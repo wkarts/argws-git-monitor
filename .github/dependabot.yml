@@ -1,5 +1,8 @@
 version: 2
 
+# As atualizações de versão ficam desativadas para evitar a abertura automática
+# de múltiplos Pull Requests. As dependências devem ser atualizadas de forma
+# controlada em uma manutenção planejada e validada pelo CI.
 updates:
   - package-ecosystem: pip
     directory: /backend
@@ -7,7 +10,7 @@ updates:
       interval: monthly
       time: "06:00"
       timezone: America/Bahia
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
     groups:
       backend-minor-patch:
         patterns:
@@ -26,7 +29,7 @@ updates:
       interval: monthly
       time: "06:10"
       timezone: America/Bahia
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
     groups:
       frontend-minor-patch:
         patterns:
@@ -45,7 +48,7 @@ updates:
       interval: monthly
       time: "06:20"
       timezone: America/Bahia
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
     groups:
       backend-container-minor-patch:
         patterns:
@@ -64,7 +67,7 @@ updates:
       interval: monthly
       time: "06:30"
       timezone: America/Bahia
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
     groups:
       frontend-container-minor-patch:
         patterns:
@@ -83,7 +86,7 @@ updates:
       interval: monthly
       time: "06:40"
       timezone: America/Bahia
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 0
     groups:
       actions-minor-patch:
         patterns:
