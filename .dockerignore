@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+**/dist
+backups
+.env
+CREDENCIAIS_INICIAIS.txt
+*.zip
+*.tar.gz

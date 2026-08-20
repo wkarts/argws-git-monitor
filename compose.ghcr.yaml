@@ -1,0 +1,11 @@
+services:
+  migrate:
+    image: ghcr.io/wkarts/argws-git-monitor-api:${IMAGE_TAG:-latest}
+  api:
+    image: ghcr.io/wkarts/argws-git-monitor-api:${IMAGE_TAG:-latest}
+  worker:
+    image: ghcr.io/wkarts/argws-git-monitor-api:${IMAGE_TAG:-latest}
+  beat:
+    image: ghcr.io/wkarts/argws-git-monitor-api:${IMAGE_TAG:-latest}
+  web:
+    image: ghcr.io/wkarts/argws-git-monitor-web:${IMAGE_TAG:-latest}

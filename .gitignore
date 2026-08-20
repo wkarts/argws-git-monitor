@@ -1,34 +1,42 @@
-# Sistema
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Logs
-*.log
-logs/
-
-# Ambiente
+# Segredos e credenciais
 .env
 .env.*
 !.env.example
+CREDENCIAIS_INICIAIS.txt
+*.pem
+*.key
 
-# Node/PHP/Python/Rust comuns
-node_modules/
-vendor/
+# Python
 __pycache__/
-target/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node/Vite
+node_modules/
 dist/
-build/
-coverage/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
 
-# IDE
-.vscode/
+# IDE/SO
 .idea/
+.vscode/
+.DS_Store
+Thumbs.db
 
-# Docker local
-docker-compose.override.yml
+# Operação
+backups/*
+!backups/.gitkeep
+*.dump
+*.sql.gz
+*.log
 
-# Temporarios
-tmp/
-temp/
-*.tmp
+# Pacotes gerados
+*.zip
+*.tar.gz
+SHA256SUMS.txt
