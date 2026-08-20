@@ -20,11 +20,12 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
           cache: pip
+          cache-dependency-path: backend/pyproject.toml
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
       - run: ruff check app tests migrations --select E9,F
@@ -37,8 +38,8 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - run: npm install --no-audit --no-fund
@@ -49,8 +50,8 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - run: pip install pyyaml cryptography pillow

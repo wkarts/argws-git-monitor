@@ -6,54 +6,112 @@ function Fail([string]$Message) {
     Write-Host "`n[ERRO] $Message" -ForegroundColor Red
     exit 1
 }
+
 function Info([string]$Message) {
     Write-Host "`n[ARGWS Git Monitor] $Message" -ForegroundColor Cyan
+}
+
+function Warning([string]$Message) {
+    Write-Host "`n[AVISO] $Message" -ForegroundColor Yellow
+}
+
+function Get-EnvValue([string]$Name, [string]$DefaultValue = "") {
+    $Pattern = "^" + [regex]::Escape($Name) + "="
+    $Line = Get-Content .env | Where-Object { $_ -match $Pattern } | Select-Object -First 1
+    if (-not $Line) {
+        return $DefaultValue
+    }
+
+    return ($Line -replace $Pattern, "").Trim('"')
 }
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Fail "Docker não encontrado. Instale o Docker Desktop com suporte ao Compose."
 }
+
 & docker compose version *> $null
-if ($LASTEXITCODE -ne 0) { Fail "O plugin 'docker compose' não está disponível." }
+if ($LASTEXITCODE -ne 0) {
+    Fail "O plugin 'docker compose' não está disponível."
+}
+
 & docker info *> $null
-if ($LASTEXITCODE -ne 0) { Fail "O Docker Desktop/Engine não está em execução." }
+if ($LASTEXITCODE -ne 0) {
+    Fail "O Docker Desktop/Engine não está em execução."
+}
 
 if (-not (Test-Path ".env")) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-env.ps1
-    if ($LASTEXITCODE -ne 0) { Fail "Não foi possível gerar o arquivo .env." }
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Não foi possível gerar o arquivo .env."
+    }
+}
+
+$InstallSource = Get-EnvValue "INSTALL_SOURCE" "ghcr"
+$ComposeFiles = @("-f", "compose.yaml")
+if ($InstallSource -eq "ghcr") {
+    $ComposeFiles += @("-f", "compose.ghcr.yaml")
 }
 
 Info "Validando a configuração Docker"
-& docker compose config -q
-if ($LASTEXITCODE -ne 0) { Fail "Configuração Docker inválida." }
+& docker compose @ComposeFiles config -q
+if ($LASTEXITCODE -ne 0) {
+    Fail "Configuração Docker inválida."
+}
 
-Info "Construindo e iniciando todos os serviços"
-& docker compose up -d --build --remove-orphans
-if ($LASTEXITCODE -ne 0) { Fail "Falha ao iniciar a stack." }
+if ($InstallSource -eq "local") {
+    Info "Construindo as imagens localmente"
+    & docker compose @ComposeFiles up -d --build --remove-orphans
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Falha ao construir ou iniciar a stack."
+    }
+}
+else {
+    Info "Baixando as imagens oficiais do GHCR"
+    & docker compose @ComposeFiles pull
 
-$PublicUrl = "http://localhost:8080"
-$UrlLine = Get-Content .env | Where-Object { $_ -match '^PUBLIC_BASE_URL=' } | Select-Object -First 1
-if ($UrlLine) { $PublicUrl = ($UrlLine -replace '^PUBLIC_BASE_URL=', '').Trim('"') }
-$HttpPort = "8080"
-$PortLine = Get-Content .env | Where-Object { $_ -match '^APP_HTTP_PORT=' } | Select-Object -First 1
-if ($PortLine) { $HttpPort = ($PortLine -replace '^APP_HTTP_PORT=', '').Trim('"') }
+    if ($LASTEXITCODE -eq 0) {
+        Info "Iniciando a stack com as imagens publicadas"
+        & docker compose @ComposeFiles up -d --no-build --remove-orphans
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Falha ao iniciar a stack com as imagens do GHCR."
+        }
+    }
+    else {
+        Warning "Não foi possível baixar uma ou mais imagens do GHCR. Será realizado o build local como contingência."
+        $ComposeFiles = @("-f", "compose.yaml")
+        & docker compose @ComposeFiles up -d --build --remove-orphans
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Falha ao iniciar a stack."
+        }
+    }
+}
+
+$PublicUrl = Get-EnvValue "PUBLIC_BASE_URL" "http://localhost:8080"
+$HttpPort = Get-EnvValue "APP_HTTP_PORT" "8080"
 $HealthUrl = "http://127.0.0.1:$HttpPort/api/v1/health/ready"
 $Healthy = $false
+
 for ($i = 0; $i -lt 90; $i++) {
     try {
         $Response = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 3
-        if ($Response.StatusCode -eq 200) { $Healthy = $true; break }
-    } catch { }
+        if ($Response.StatusCode -eq 200) {
+            $Healthy = $true
+            break
+        }
+    }
+    catch {
+    }
+
     Start-Sleep -Seconds 2
 }
 
 if (-not $Healthy) {
-    & docker compose ps
-    & docker compose logs --tail=120 migrate api worker web
+    & docker compose @ComposeFiles ps
+    & docker compose @ComposeFiles logs --tail=120 migrate api worker web
     Fail "A verificação de saúde não foi concluída. Consulte os logs acima."
 }
 
 Info "Instalação concluída"
-& docker compose ps
+& docker compose @ComposeFiles ps
 Write-Host "`nAplicação: $PublicUrl" -ForegroundColor Green
 Write-Host "Credenciais: $Root\CREDENCIAIS_INICIAIS.txt`n"
