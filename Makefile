@@ -1,4 +1,4 @@
-.PHONY: install up down restart logs status test validate backup update publish clean
+.PHONY: install up down restart logs status test validate validate-deploys backup update publish clean deploy-ghcr deploy-local deploy-dockge
 
 install:
 	./scripts/install.sh
@@ -23,6 +23,19 @@ test:
 
 validate:
 	python3 scripts/validate-package.py
+	python3 scripts/validate-deploy-layout.py
+
+validate-deploys:
+	python3 scripts/validate-deploy-layout.py
+
+deploy-ghcr:
+	bash deploy/docker/deploy-ghcr.sh
+
+deploy-local:
+	bash deploy/docker/deploy-local.sh
+
+deploy-dockge:
+	bash deploy/dockge/deploy.sh
 
 backup:
 	./scripts/backup.sh

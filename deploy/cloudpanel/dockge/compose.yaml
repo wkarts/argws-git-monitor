@@ -1,7 +1,5 @@
 name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
-# Compatibilidade na raiz. Os pacotes separados e documentados ficam em deploy/.
-
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
   APP_VERSION: ${APP_VERSION:-0.2.2}
@@ -10,8 +8,8 @@ x-app-environment: &app-environment
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY obrigatória}
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY obrigatória}
-  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
-  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL obrigatória}
+  CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS obrigatória}
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gitmonitor}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatória}@postgres:5432/${POSTGRES_DB:-gitmonitor}
   REDIS_URL: redis://redis:6379/0
   CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-gitmonitor}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS obrigatória}@rabbitmq:5672//
@@ -30,10 +28,8 @@ x-app-environment: &app-environment
   NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
 
 x-api-service: &api-service
-  image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:${IMAGE_TAG:-latest}
+  image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:${IMAGE_TAG:-0.2.2}
   pull_policy: always
-  env_file:
-    - .env
   environment: *app-environment
   networks:
     - gitmonitor
@@ -157,11 +153,11 @@ services:
         condition: service_healthy
 
   web:
-    image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:${IMAGE_TAG:-latest}
+    image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:${IMAGE_TAG:-0.2.2}
     pull_policy: always
     restart: unless-stopped
     ports:
-      - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_HTTP_PORT:-8080}:80"
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_HTTP_PORT:-8080}:80"
     networks:
       - gitmonitor
     depends_on:

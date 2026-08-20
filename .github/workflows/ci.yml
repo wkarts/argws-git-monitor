@@ -56,8 +56,19 @@ jobs:
           python-version: '3.13'
       - run: pip install pyyaml cryptography pillow
       - run: python scripts/validate-package.py
+      - run: python scripts/validate-deploy-layout.py
       - run: cp .env.example .env
       - run: docker compose config -q
       - run: docker compose -f compose.dockge.yaml config -q
+      - name: Validar Compose Docker GHCR
+        run: docker compose --env-file deploy/docker/.env.example -f deploy/docker/compose.ghcr.yaml config -q
+      - name: Validar Compose Docker local
+        run: docker compose --env-file deploy/docker/.env.example -f deploy/docker/compose.local.yaml config -q
+      - name: Validar Compose Dockge
+        run: docker compose --env-file deploy/dockge/.env.example -f deploy/dockge/compose.yaml config -q
+      - name: Validar Compose Portainer
+        run: docker compose --env-file deploy/portainer/stack.env.example -f deploy/portainer/compose.yaml config -q
+      - name: Validar Compose CloudPanel e Dockge
+        run: docker compose --env-file deploy/cloudpanel/dockge/.env.example -f deploy/cloudpanel/dockge/compose.yaml config -q
       - run: docker build -t argws-git-monitor-api:test backend
       - run: docker build -t argws-git-monitor-web:test frontend

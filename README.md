@@ -28,9 +28,53 @@ A interface aprovada na versão 0.2.0 permanece como contrato visual da série 0
 
 Os critérios, rotas, componentes e larguras de aceitação estão documentados em `docs/CONTRATO_VISUAL.md`.
 
+## Deploys separados
+
+Os pacotes oficiais de implantação ficam em `deploy/`, separados por ambiente:
+
+```text
+deploy/
+├── cloudpanel/
+│   ├── README.md
+│   ├── nginx/argws-git-monitor.conf
+│   └── dockge/
+│       ├── compose.yaml
+│       ├── .env.example
+│       ├── generate-env.sh
+│       └── deploy.sh
+├── dockge/
+│   ├── README.md
+│   ├── compose.yaml
+│   ├── .env.example
+│   ├── generate-env.sh
+│   └── deploy.sh
+├── portainer/
+│   ├── README.md
+│   ├── compose.yaml
+│   ├── stack.env.example
+│   └── generate-stack-env.sh
+└── docker/
+    ├── README.md
+    ├── compose.ghcr.yaml
+    ├── compose.local.yaml
+    ├── .env.example
+    ├── generate-env.sh
+    ├── deploy-ghcr.sh
+    └── deploy-local.sh
+```
+
+| Ambiente | Diretório | Uso |
+|---|---|---|
+| CloudPanel + Dockge | `deploy/cloudpanel/` | Containers no Dockge e domínio/HTTPS no CloudPanel |
+| Dockge | `deploy/dockge/` | Stack pronta para o diretório ou editor do Dockge |
+| Portainer | `deploy/portainer/` | Stack sem `env_file`, preparada para variáveis do painel |
+| Docker Compose | `deploy/docker/` | Imagens GHCR ou build local por linha de comando |
+
+O índice completo está em `deploy/README.md`.
+
 ## Instalação direta
 
-Os instaladores usam as imagens prontas do GHCR por padrão. Caso o pull não esteja disponível, realizam automaticamente o build local com o código-fonte.
+Os instaladores da raiz continuam disponíveis por compatibilidade e usam as imagens prontas do GHCR por padrão. Caso o pull não esteja disponível, realizam automaticamente o build local com o código-fonte.
 
 ### Windows
 
@@ -47,43 +91,69 @@ chmod +x INSTALAR_LINUX.sh
 ./INSTALAR_LINUX.sh
 ```
 
-### GHCR manual
+## Docker Compose separado
 
-Gere o `.env` seguro. Não copie `.env.example` sobre o `.env` gerado:
-
-```bash
-./scripts/generate-env.sh
-```
-
-Depois, baixe e execute as imagens:
+### Imagens GHCR
 
 ```bash
-docker compose -f compose.yaml -f compose.ghcr.yaml pull
-docker compose -f compose.yaml -f compose.ghcr.yaml up -d --no-build --remove-orphans
+cd deploy/docker
+bash generate-env.sh
+bash deploy-ghcr.sh
 ```
 
-Também existe uma stack autônoma para Dockge e Portainer:
+### Build local
 
 ```bash
-docker compose -f compose.dockge.yaml pull
-docker compose -f compose.dockge.yaml up -d --no-build --remove-orphans
+cd deploy/docker
+bash generate-env.sh
+bash deploy-local.sh
 ```
 
-### Build Docker local
+O build local usa os contextos `../../backend` e `../../frontend`; portanto, deve ser executado dentro do repositório completo.
+
+## Dockge separado
 
 ```bash
-./scripts/generate-env.sh
-docker compose -f compose.yaml up -d --build --remove-orphans
+cd deploy/dockge
+bash generate-env.sh --url https://git.seu-dominio.com.br --bind 127.0.0.1
+bash deploy.sh
 ```
 
-Para forçar permanentemente o modo local, configure no `.env`:
+O mesmo `compose.yaml` pode ser colado diretamente no editor do Dockge.
 
-```dotenv
-INSTALL_SOURCE=local
-IMAGE_TAG=local
+## CloudPanel junto com Dockge
+
+```bash
+cd deploy/cloudpanel/dockge
+bash generate-env.sh --url https://git.seu-dominio.com.br
+bash deploy.sh
 ```
 
-A instalação aplica migrations, cria o administrador, inicializa workers e aguarda a prontidão da API. Não é necessário instalar Python, Node.js, PostgreSQL, Redis ou RabbitMQ diretamente no host.
+Depois, aplique o reverse proxy disponível em:
+
+```text
+deploy/cloudpanel/nginx/argws-git-monitor.conf
+```
+
+A stack CloudPanel mantém a aplicação vinculada a `127.0.0.1:8080`; o domínio e o TLS ficam sob responsabilidade do Nginx administrado pelo CloudPanel.
+
+## Portainer separado
+
+Use:
+
+```text
+deploy/portainer/compose.yaml
+deploy/portainer/stack.env.example
+```
+
+Para gerar variáveis seguras:
+
+```bash
+cd deploy/portainer
+bash generate-stack-env.sh --url https://git.seu-dominio.com.br --bind 127.0.0.1
+```
+
+Importe o conteúdo de `stack.env` na seção **Environment variables** do Portainer.
 
 ## Imagens Docker
 
@@ -99,15 +169,15 @@ Tags produzidas para esta versão:
 ```text
 latest
 sha-<commit>
-0.2.1
+0.2.2
 0.2
 ```
 
 Exemplo de pull versionado:
 
 ```bash
-docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.1
-docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.1
+docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.2
+docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.2
 ```
 
 Pacotes GHCR privados exigem autenticação antes do pull:
@@ -166,13 +236,15 @@ Portas locais:
 ./scripts/update.sh
 ```
 
-## Produção com domínio
+Atalhos adicionais:
 
 ```bash
-./scripts/configure-domain.sh https://git.seu-dominio.com.br
+make validate
+make validate-deploys
+make deploy-ghcr
+make deploy-local
+make deploy-dockge
 ```
-
-Depois, aponte o proxy HTTPS para `http://127.0.0.1:8080`. Para webhooks automáticos, `PUBLIC_BASE_URL` precisa ser pública e HTTPS.
 
 ## CI/CD e versionamento
 
@@ -186,19 +258,25 @@ frontend/package.json
 
 Ao receber um push na `main`, o workflow:
 
-1. valida backend, frontend, pacote e Docker Compose;
-2. constrói as imagens API e Web para `linux/amd64` e `linux/arm64`;
-3. publica e inspeciona os manifests no GHCR;
-4. atualiza as tags `latest` e `sha-*`;
-5. quando a tag Git da versão ainda não existe, cria `v<versão>`;
-6. publica a GitHub Release com ZIP, TAR.GZ e `SHA256SUMS.txt`.
+1. valida backend, frontend, pacote e todos os diretórios de deploy;
+2. valida os arquivos Compose de Docker, Dockge, Portainer e CloudPanel;
+3. constrói as imagens API e Web para `linux/amd64` e `linux/arm64`;
+4. publica e inspeciona os manifests no GHCR;
+5. atualiza as tags `latest` e `sha-*`;
+6. quando a tag Git da versão ainda não existe, cria `v<versão>`;
+7. publica a GitHub Release com ZIP, TAR.GZ e `SHA256SUMS.txt`.
 
-Versão atual: **0.2.1**. Git tag da release: **v0.2.1**. A tag da imagem Docker é **0.2.1**, sem o prefixo `v`.
+Versão atual: **0.2.2**. Git tag da release: **v0.2.2**. A tag da imagem Docker é **0.2.2**, sem o prefixo `v`.
 
-Atualizações automáticas de versão do Dependabot estão desativadas para impedir a abertura massiva de PRs. As dependências devem ser atualizadas em manutenção planejada, com validação pela CI.
+Atualizações automáticas de versão do Dependabot permanecem desativadas para impedir a abertura massiva de PRs.
 
 ## Documentação
 
+- `deploy/README.md`
+- `deploy/cloudpanel/README.md`
+- `deploy/dockge/README.md`
+- `deploy/portainer/README.md`
+- `deploy/docker/README.md`
 - `docs/ARQUITETURA.md`
 - `docs/GITHUB.md`
 - `docs/OPERACAO.md`
@@ -236,6 +314,7 @@ Validação completa:
 
 ```bash
 python scripts/validate-package.py
+python scripts/validate-deploy-layout.py
 node scripts/validate-frontend.cjs
 cd backend && pytest --cov=app --cov-fail-under=40
 ```

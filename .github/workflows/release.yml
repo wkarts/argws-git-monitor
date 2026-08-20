@@ -78,7 +78,7 @@ jobs:
           fi
 
   validate:
-    name: Validar aplicação
+    name: Validar aplicação e deploys
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -113,13 +113,32 @@ jobs:
           npm run typecheck
           npm run build
 
-      - name: Validar pacote e Docker Compose
+      - name: Validar pacote e estrutura de deploy
         run: |
           pip install pyyaml cryptography pillow
           python scripts/validate-package.py
+          python scripts/validate-deploy-layout.py
+
+      - name: Validar Compose da raiz
+        run: |
           cp .env.example .env
           docker compose config -q
           docker compose -f compose.dockge.yaml config -q
+
+      - name: Validar Compose Docker GHCR
+        run: docker compose --env-file deploy/docker/.env.example -f deploy/docker/compose.ghcr.yaml config -q
+
+      - name: Validar Compose Docker local
+        run: docker compose --env-file deploy/docker/.env.example -f deploy/docker/compose.local.yaml config -q
+
+      - name: Validar Compose Dockge
+        run: docker compose --env-file deploy/dockge/.env.example -f deploy/dockge/compose.yaml config -q
+
+      - name: Validar Compose Portainer
+        run: docker compose --env-file deploy/portainer/stack.env.example -f deploy/portainer/compose.yaml config -q
+
+      - name: Validar Compose CloudPanel e Dockge
+        run: docker compose --env-file deploy/cloudpanel/dockge/.env.example -f deploy/cloudpanel/dockge/compose.yaml config -q
 
   images:
     name: Imagem ${{ matrix.component }}
@@ -282,6 +301,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ROOT="argws-git-monitor-v${VERSION}"
+          DEPLOY_ROOT="argws-git-monitor-deploys-v${VERSION}"
           mkdir -p dist
 
           git archive \
@@ -296,13 +316,25 @@ jobs:
             --output="dist/${ROOT}.tar.gz" \
             HEAD
 
+          git archive \
+            --format=zip \
+            --prefix="${DEPLOY_ROOT}/" \
+            --output="dist/${DEPLOY_ROOT}.zip" \
+            HEAD \
+            deploy backend frontend VERSION README.md LICENSE
+
           (
             cd dist
-            sha256sum "${ROOT}.zip" "${ROOT}.tar.gz" > SHA256SUMS.txt
+            sha256sum \
+              "${ROOT}.zip" \
+              "${ROOT}.tar.gz" \
+              "${DEPLOY_ROOT}.zip" \
+              > SHA256SUMS.txt
           )
 
           echo "zip=dist/${ROOT}.zip" >> "$GITHUB_OUTPUT"
           echo "tar=dist/${ROOT}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "deploy_zip=dist/${DEPLOY_ROOT}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Publicar release
         uses: softprops/action-gh-release@v2
@@ -316,6 +348,7 @@ jobs:
           files: |
             ${{ steps.package.outputs.zip }}
             ${{ steps.package.outputs.tar }}
+            ${{ steps.package.outputs.deploy_zip }}
             dist/SHA256SUMS.txt
 
       - name: Resumo da release
@@ -327,5 +360,7 @@ jobs:
             echo "- Tag Git: \`${{ needs.prepare.outputs.tag }}\`"
             echo "- API GHCR: \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-api:${{ needs.prepare.outputs.version }}\`"
             echo "- Web GHCR: \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-web:${{ needs.prepare.outputs.version }}\`"
-            echo "- Pacotes: ZIP, TAR.GZ e SHA256SUMS"
+            echo "- Pacote completo: ZIP e TAR.GZ"
+            echo "- Pacote de deploys separados: ZIP"
+            echo "- Checksums: SHA256SUMS.txt"
           } >> "$GITHUB_STEP_SUMMARY"
