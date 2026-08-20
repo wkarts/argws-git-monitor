@@ -49,22 +49,22 @@ O script respeita `INSTALL_SOURCE` no `.env`:
 A tag das imagens não usa o prefixo `v`:
 
 ```bash
-IMAGE_TAG=0.2.0 docker compose -f compose.yaml -f compose.ghcr.yaml pull
-IMAGE_TAG=0.2.0 docker compose -f compose.yaml -f compose.ghcr.yaml up -d --no-build --remove-orphans
+IMAGE_TAG=0.2.1 docker compose -f compose.yaml -f compose.ghcr.yaml pull
+IMAGE_TAG=0.2.1 docker compose -f compose.yaml -f compose.ghcr.yaml up -d --no-build --remove-orphans
 ```
 
 Com a stack autônoma para Dockge/Portainer:
 
 ```bash
-IMAGE_TAG=0.2.0 docker compose -f compose.dockge.yaml pull
-IMAGE_TAG=0.2.0 docker compose -f compose.dockge.yaml up -d --no-build --remove-orphans
+IMAGE_TAG=0.2.1 docker compose -f compose.dockge.yaml pull
+IMAGE_TAG=0.2.1 docker compose -f compose.dockge.yaml up -d --no-build --remove-orphans
 ```
 
 Imagens:
 
 ```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.0
-ghcr.io/wkarts/argws-git-monitor-web:0.2.0
+ghcr.io/wkarts/argws-git-monitor-api:0.2.1
+ghcr.io/wkarts/argws-git-monitor-web:0.2.1
 ```
 
 Se os pacotes estiverem privados, autentique antes do pull:

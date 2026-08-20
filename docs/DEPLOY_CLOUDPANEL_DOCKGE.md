@@ -21,11 +21,11 @@ Ajuste no `.env` somente os dados do ambiente, como domínio e porta. Não publi
 Para usar uma versão específica das imagens:
 
 ```dotenv
-IMAGE_TAG=0.2.0
+IMAGE_TAG=0.2.1
 INSTALL_SOURCE=ghcr
 ```
 
-A tag Docker é `0.2.0`; a Git tag da release é `v0.2.0`.
+A tag Docker é `0.2.1`; a Git tag da release é `v0.2.1`.
 
 ## Dockge
 
@@ -67,7 +67,7 @@ docker compose -f compose.yaml up -d --build --remove-orphans
 
 ## GHCR privado
 
-Se a imagem estiver privada, autentique o host antes do pull:
+Quando as imagens estiverem privadas, autentique o host antes do pull:
 
 ```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin

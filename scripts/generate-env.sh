@@ -39,7 +39,7 @@ URL="http://localhost:${PORT}"
 cat > "$ENV_PATH" <<EOF
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.0
+APP_VERSION=0.2.1
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO

@@ -18,7 +18,9 @@ Central operacional **mobile-first** para monitorar repositórios públicos e pr
 - JWT de curta duração, refresh token rotativo/revogável, Argon2 e troca obrigatória da senha inicial.
 - Logs estruturados, health checks, métricas Prometheus, backup e restauração.
 
-## Interface v0.2.0
+## Interface visual
+
+A interface aprovada na versão 0.2.0 permanece como contrato visual da série 0.2.x.
 
 ![Dashboard desktop](docs/previews/argws-git-monitor-dashboard-desktop-v0.2.0.png)
 
@@ -47,11 +49,15 @@ chmod +x INSTALAR_LINUX.sh
 
 ### GHCR manual
 
-```bash
-cp .env.example .env
-# Gere os segredos antes de iniciar:
-./scripts/generate-env.sh
+Gere o `.env` seguro. Não copie `.env.example` sobre o `.env` gerado:
 
+```bash
+./scripts/generate-env.sh
+```
+
+Depois, baixe e execute as imagens:
+
+```bash
 docker compose -f compose.yaml -f compose.ghcr.yaml pull
 docker compose -f compose.yaml -f compose.ghcr.yaml up -d --no-build --remove-orphans
 ```
@@ -88,20 +94,20 @@ ghcr.io/wkarts/argws-git-monitor-api
 ghcr.io/wkarts/argws-git-monitor-web
 ```
 
-Tags produzidas:
+Tags produzidas para esta versão:
 
 ```text
 latest
 sha-<commit>
-0.2.0
+0.2.1
 0.2
 ```
 
 Exemplo de pull versionado:
 
 ```bash
-docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.0
-docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.0
+docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.1
+docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.1
 ```
 
 Pacotes GHCR privados exigem autenticação antes do pull:
@@ -187,7 +193,7 @@ Ao receber um push na `main`, o workflow:
 5. quando a tag Git da versão ainda não existe, cria `v<versão>`;
 6. publica a GitHub Release com ZIP, TAR.GZ e `SHA256SUMS.txt`.
 
-Versão atual: **0.2.0**. Git tag da release: **v0.2.0**. A tag da imagem Docker é **0.2.0**, sem o prefixo `v`.
+Versão atual: **0.2.1**. Git tag da release: **v0.2.1**. A tag da imagem Docker é **0.2.1**, sem o prefixo `v`.
 
 Atualizações automáticas de versão do Dependabot estão desativadas para impedir a abertura massiva de PRs. As dependências devem ser atualizadas em manutenção planejada, com validação pela CI.
 
