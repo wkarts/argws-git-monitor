@@ -1,0 +1,189 @@
+name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
+
+x-app-environment: &app-environment
+  APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
+  APP_VERSION: ${APP_VERSION:-0.2.0}
+  APP_ENV: ${APP_ENV:-production}
+  APP_DEBUG: ${APP_DEBUG:-false}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY obrigatória}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY obrigatória}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-gitmonitor}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatória}@postgres:5432/${POSTGRES_DB:-gitmonitor}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-gitmonitor}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS obrigatória}@rabbitmq:5672//
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  INITIAL_ADMIN_NAME: ${INITIAL_ADMIN_NAME:-Administrador ARGWS}
+  INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-admin@argws.com.br}
+  INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD obrigatória}
+  INITIAL_ADMIN_MUST_CHANGE_PASSWORD: ${INITIAL_ADMIN_MUST_CHANGE_PASSWORD:-true}
+  GITHUB_API_URL: ${GITHUB_API_URL:-https://api.github.com}
+  GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET obrigatória}
+  GITHUB_REPOSITORY_LIMIT: ${GITHUB_REPOSITORY_LIMIT:-300}
+  GITHUB_REQUEST_TIMEOUT_SECONDS: ${GITHUB_REQUEST_TIMEOUT_SECONDS:-30}
+  GITHUB_CONCURRENCY: ${GITHUB_CONCURRENCY:-5}
+  SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-600}
+  DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-true}
+  NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
+
+x-api-service: &api-service
+  image: ${API_IMAGE:-argws-git-monitor-api}:${IMAGE_TAG:-local}
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  environment: *app-environment
+  networks:
+    - gitmonitor
+  security_opt:
+    - no-new-privileges:true
+  init: true
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gitmonitor}
+      POSTGRES_USER: ${POSTGRES_USER:-gitmonitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatória}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - gitmonitor
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gitmonitor} -d ${POSTGRES_DB:-gitmonitor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - gitmonitor
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-gitmonitor}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS obrigatória}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    networks:
+      - gitmonitor
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    <<: *api-service
+    command: ["migrate"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *api-service
+    restart: unless-stopped
+    command: ["api"]
+    environment:
+      <<: *app-environment
+      API_WORKERS: ${API_WORKERS:-2}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    <<: *api-service
+    restart: unless-stopped
+    command: ["worker"]
+    environment:
+      <<: *app-environment
+      CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-2}
+      CELERY_MAX_TASKS_PER_CHILD: ${CELERY_MAX_TASKS_PER_CHILD:-100}
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  beat:
+    <<: *api-service
+    restart: unless-stopped
+    command: ["beat"]
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  web:
+    image: ${WEB_IMAGE:-argws-git-monitor-web}:${IMAGE_TAG:-local}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_APP_VERSION: ${APP_VERSION:-0.2.0}
+        VITE_API_BASE_URL: /api/v1
+    restart: unless-stopped
+    ports:
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_HTTP_PORT:-8080}:80"
+    networks:
+      - gitmonitor
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  gitmonitor:
+    name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}_network
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}_postgres_data
+  redis_data:
+    name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}_redis_data
+  rabbitmq_data:
+    name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}_rabbitmq_data

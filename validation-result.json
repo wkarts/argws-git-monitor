@@ -1,0 +1,8 @@
+{
+  "project": "ARGWS Git Monitor",
+  "version": "0.2.0",
+  "checks": 15,
+  "warnings": [],
+  "errors": [],
+  "status": "passed"
+}

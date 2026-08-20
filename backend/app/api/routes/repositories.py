@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+import math
+import uuid
+
+from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import func, select
+
+from app.api.deps import CurrentUser, DbSession
+from app.models.github import (
+    GitHubConnection,
+    HealthStatus,
+    PullRequest,
+    Release,
+    Repository,
+    WorkflowRun,
+)
+from app.schemas.common import PaginatedResponse
+from app.schemas.github import SyncAcceptedResponse
+from app.schemas.repository import (
+    PullRequestRead,
+    ReleaseRead,
+    RepositoryDetail,
+    RepositoryRead,
+    RepositoryUpdate,
+    WorkflowActionResponse,
+    WorkflowRunRead,
+)
+from app.services.github_client import GitHubAPIError
+from app.services.github_sync import get_repository_client
+from app.tasks.jobs import sync_repository_task
+
+router = APIRouter(prefix="/repositories", tags=["Repositórios"])
+
+
+async def _owned_repository(
+    db: DbSession, repository_id: uuid.UUID, user_id: uuid.UUID
+) -> Repository:
+    result = await db.execute(
+        select(Repository)
+        .join(GitHubConnection)
+        .where(Repository.id == repository_id, GitHubConnection.user_id == user_id)
+    )
+    repository = result.scalar_one_or_none()
+    if not repository:
+        raise HTTPException(status_code=404, detail="Repositório não encontrado.")
+    return repository
+
+
+@router.get("", response_model=PaginatedResponse[RepositoryRead])
+async def list_repositories(
+    current_user: CurrentUser,
+    db: DbSession,
+    q: str | None = Query(default=None, max_length=200),
+    health: HealthStatus | None = None,
+    private: bool | None = None,
+    monitoring_enabled: bool | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=24, ge=1, le=100),
+):
+    query = (
+        select(Repository)
+        .join(GitHubConnection)
+        .where(GitHubConnection.user_id == current_user.id)
+    )
+    if q:
+        search = f"%{q.strip()}%"
+        query = query.where(
+            Repository.full_name.ilike(search) | Repository.description.ilike(search)
+        )
+    if health:
+        query = query.where(Repository.health_status == health)
+    if private is not None:
+        query = query.where(Repository.private == private)
+    if monitoring_enabled is not None:
+        query = query.where(Repository.monitoring_enabled == monitoring_enabled)
+
+    count_query = select(func.count()).select_from(query.order_by(None).subquery())
+    total = int((await db.execute(count_query)).scalar_one())
+    query = query.order_by(
+        Repository.health_score.asc(),
+        Repository.github_updated_at.desc().nullslast(),
+        Repository.full_name.asc(),
+    ).offset((page - 1) * page_size).limit(page_size)
+    items = (await db.execute(query)).scalars().all()
+    return PaginatedResponse[RepositoryRead](
+        items=[RepositoryRead.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=max(math.ceil(total / page_size), 1),
+    )
+
+
+@router.get("/{repository_id}", response_model=RepositoryDetail)
+async def repository_detail(
+    repository_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> RepositoryDetail:
+    repository = await _owned_repository(db, repository_id, current_user.id)
+    workflows = (
+        await db.execute(
+            select(WorkflowRun)
+            .where(WorkflowRun.repository_id == repository.id)
+            .order_by(WorkflowRun.github_created_at.desc().nullslast())
+            .limit(30)
+        )
+    ).scalars().all()
+    pull_requests = (
+        await db.execute(
+            select(PullRequest)
+            .where(PullRequest.repository_id == repository.id)
+            .order_by(PullRequest.github_updated_at.desc().nullslast())
+            .limit(100)
+        )
+    ).scalars().all()
+    releases = (
+        await db.execute(
+            select(Release)
+            .where(Release.repository_id == repository.id)
+            .order_by(Release.published_at.desc().nullslast())
+            .limit(20)
+        )
+    ).scalars().all()
+    base = RepositoryRead.model_validate(repository).model_dump()
+    return RepositoryDetail(
+        **base,
+        workflow_runs=[WorkflowRunRead.model_validate(item) for item in workflows],
+        pull_requests=[PullRequestRead.model_validate(item) for item in pull_requests],
+        releases=[ReleaseRead.model_validate(item) for item in releases],
+    )
+
+
+@router.patch("/{repository_id}", response_model=RepositoryRead)
+async def update_repository(
+    repository_id: uuid.UUID,
+    payload: RepositoryUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> RepositoryRead:
+    repository = await _owned_repository(db, repository_id, current_user.id)
+    repository.monitoring_enabled = payload.monitoring_enabled
+    await db.commit()
+    await db.refresh(repository)
+    return RepositoryRead.model_validate(repository)
+
+
+@router.post("/{repository_id}/sync", response_model=SyncAcceptedResponse)
+async def sync_repository_now(
+    repository_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> SyncAcceptedResponse:
+    await _owned_repository(db, repository_id, current_user.id)
+    task = sync_repository_task.delay(str(repository_id))
+    return SyncAcceptedResponse(message="Sincronização adicionada à fila.", task_id=task.id)
+
+
+async def _run_workflow_action(
+    repository_id: uuid.UUID,
+    user_id: uuid.UUID,
+    run_id: int,
+    action: str,
+) -> WorkflowActionResponse:
+    try:
+        repository, client = await get_repository_client(repository_id, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        if action == "rerun-failed":
+            await client.rerun_failed_workflow(repository.full_name, run_id)
+            message = "Jobs com falha foram enviados para nova execução."
+        elif action == "rerun":
+            await client.rerun_workflow(repository.full_name, run_id)
+            message = "Workflow enviado para nova execução."
+        elif action == "cancel":
+            await client.cancel_workflow(repository.full_name, run_id)
+            message = "Cancelamento solicitado ao GitHub."
+        else:
+            raise HTTPException(status_code=400, detail="Ação de workflow inválida.")
+    except GitHubAPIError as exc:
+        status_code = 403 if exc.status_code == 403 else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    finally:
+        await client.close()
+    return WorkflowActionResponse(message=message, run_id=run_id)
+
+
+@router.post(
+    "/{repository_id}/workflow-runs/{run_id}/rerun-failed",
+    response_model=WorkflowActionResponse,
+)
+async def rerun_failed_workflow(
+    repository_id: uuid.UUID,
+    run_id: int,
+    current_user: CurrentUser,
+):
+    return await _run_workflow_action(repository_id, current_user.id, run_id, "rerun-failed")
+
+
+@router.post(
+    "/{repository_id}/workflow-runs/{run_id}/rerun",
+    response_model=WorkflowActionResponse,
+)
+async def rerun_workflow(
+    repository_id: uuid.UUID,
+    run_id: int,
+    current_user: CurrentUser,
+):
+    return await _run_workflow_action(repository_id, current_user.id, run_id, "rerun")
+
+
+@router.post(
+    "/{repository_id}/workflow-runs/{run_id}/cancel",
+    response_model=WorkflowActionResponse,
+)
+async def cancel_workflow(
+    repository_id: uuid.UUID,
+    run_id: int,
+    current_user: CurrentUser,
+):
+    return await _run_workflow_action(repository_id, current_user.id, run_id, "cancel")
