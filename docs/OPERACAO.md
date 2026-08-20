@@ -1,15 +1,40 @@
 # Operação
 
+## Pacotes oficiais de deploy
+
+```text
+deploy/cloudpanel/
+deploy/dockge/
+deploy/portainer/
+deploy/docker/
+```
+
+Consulte `deploy/README.md` para escolher a modalidade correta.
+
 ## Estado da stack
+
+Na instalação pela raiz:
 
 ```bash
 ./scripts/status.sh
 ```
 
-Ou diretamente:
+Docker separado por GHCR:
 
 ```bash
-docker compose ps
+docker compose \
+  --env-file deploy/docker/.env \
+  -f deploy/docker/compose.ghcr.yaml \
+  ps
+```
+
+Dockge separado:
+
+```bash
+docker compose \
+  --env-file deploy/dockge/.env \
+  -f deploy/dockge/compose.yaml \
+  ps
 ```
 
 ## Logs
@@ -26,13 +51,15 @@ docker compose logs -f api worker beat
 docker compose logs migrate
 ```
 
+Nos pacotes separados, sempre informe o Compose e o ambiente correspondentes.
+
 ## Reinício seguro
 
 ```bash
 docker compose restart api worker beat web
 ```
 
-## Atualização padrão
+## Atualização padrão pela raiz
 
 ```bash
 ./scripts/update.sh
@@ -44,46 +71,71 @@ O script respeita `INSTALL_SOURCE` no `.env`:
 - `local`: atualiza o código e reconstrói as imagens;
 - se o pull do GHCR falhar, o modo `ghcr` usa build local como contingência.
 
-## Atualização por imagens GHCR
+## Atualização pelo pacote Docker GHCR
+
+```bash
+cd deploy/docker
+docker compose --env-file .env -f compose.ghcr.yaml pull
+docker compose --env-file .env -f compose.ghcr.yaml up -d --no-build --remove-orphans
+```
+
+## Atualização pelo Dockge
+
+```bash
+cd deploy/dockge
+docker compose --env-file .env -f compose.yaml pull
+docker compose --env-file .env -f compose.yaml up -d --no-build --remove-orphans
+```
+
+## Imagens versionadas
 
 A tag das imagens não usa o prefixo `v`:
 
-```bash
-IMAGE_TAG=0.2.1 docker compose -f compose.yaml -f compose.ghcr.yaml pull
-IMAGE_TAG=0.2.1 docker compose -f compose.yaml -f compose.ghcr.yaml up -d --no-build --remove-orphans
-```
-
-Com a stack autônoma para Dockge/Portainer:
-
-```bash
-IMAGE_TAG=0.2.1 docker compose -f compose.dockge.yaml pull
-IMAGE_TAG=0.2.1 docker compose -f compose.dockge.yaml up -d --no-build --remove-orphans
-```
-
-Imagens:
-
 ```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.1
-ghcr.io/wkarts/argws-git-monitor-web:0.2.1
+ghcr.io/wkarts/argws-git-monitor-api:0.2.2
+ghcr.io/wkarts/argws-git-monitor-web:0.2.2
 ```
 
-Se os pacotes estiverem privados, autentique antes do pull:
+Pull manual:
+
+```bash
+docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.2
+docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.2
+```
+
+Se os pacotes estiverem privados:
 
 ```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin
 ```
 
-## Build local
+## Build local separado
 
 ```bash
-docker compose -f compose.yaml up -d --build --remove-orphans
+cd deploy/docker
+bash generate-env.sh
+bash deploy-local.sh
 ```
 
-Para definir o modo local como padrão:
+Ou manualmente:
 
-```dotenv
-INSTALL_SOURCE=local
-IMAGE_TAG=local
+```bash
+docker compose --env-file .env -f compose.local.yaml up -d --build --remove-orphans
+```
+
+## CloudPanel
+
+O pacote `deploy/cloudpanel/dockge/` mantém a aplicação em `127.0.0.1:8080`. O reverse proxy está em:
+
+```text
+deploy/cloudpanel/nginx/argws-git-monitor.conf
+```
+
+Verificação local e pública:
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/v1/health/ready
+curl -fsS https://git.seu-dominio.com.br/api/v1/health/ready
 ```
 
 ## Backup

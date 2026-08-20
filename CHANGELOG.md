@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2 — 2026-08-20
+
+- cria o diretório canônico `deploy/` com pacotes separados para CloudPanel, Dockge, Portainer e Docker Compose;
+- inclui integração completa CloudPanel + Dockge, com stack vinculada a `127.0.0.1` e snippet Nginx para reverse proxy HTTPS;
+- inclui stack autônoma para Dockge, com `compose.yaml`, ambiente, gerador de segredos e script de deploy;
+- inclui stack específica para Portainer, sem dependência de `env_file`, com modelo e gerador de variáveis do painel;
+- inclui implantação Docker por imagens GHCR e por build local, em arquivos independentes;
+- adiciona validação automatizada da estrutura, serviços, imagens, builds, bind local do CloudPanel e configuração do Portainer;
+- sincroniza a versão 0.2.2 no backend, frontend, Dockerfiles, ambientes, composes e documentação;
+- mantém os arquivos da raiz por compatibilidade, passando a considerar `deploy/` como local oficial dos pacotes de implantação.
+
 ## 0.2.1 — 2026-08-20
 
 - corrige o fluxo pós-merge para gerar automaticamente a GitHub Release quando a versão declarada ainda não possui tag;

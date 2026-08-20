@@ -1,7 +1,5 @@
 name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
-# Compatibilidade na raiz. Os pacotes separados e documentados ficam em deploy/.
-
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
   APP_VERSION: ${APP_VERSION:-0.2.2}
@@ -30,10 +28,8 @@ x-app-environment: &app-environment
   NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
 
 x-api-service: &api-service
-  image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:${IMAGE_TAG:-latest}
+  image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:${IMAGE_TAG:-0.2.2}
   pull_policy: always
-  env_file:
-    - .env
   environment: *app-environment
   networks:
     - gitmonitor
@@ -157,7 +153,7 @@ services:
         condition: service_healthy
 
   web:
-    image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:${IMAGE_TAG:-latest}
+    image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:${IMAGE_TAG:-0.2.2}
     pull_policy: always
     restart: unless-stopped
     ports:

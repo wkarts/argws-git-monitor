@@ -33,7 +33,7 @@ def main() -> None:
     env_path.write_text(
         f"""COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.1
+APP_VERSION=0.2.2
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO

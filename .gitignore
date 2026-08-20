@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+stack.env
 CREDENCIAIS_INICIAIS.txt
 *.pem
 *.key
