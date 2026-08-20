@@ -1,6 +1,6 @@
 # ARGWS Git Monitor
 
-Central operacional **mobile-first** para monitorar repositórios públicos e privados do GitHub em uma única PWA. O pacote inclui API, frontend, workers, banco de dados, filas, migrations, autenticação, Docker, CI/CD, backup e documentação.
+Central operacional **mobile-first** para monitorar repositórios públicos e privados do GitHub em uma única PWA. O projeto inclui API, frontend, workers, PostgreSQL, Redis, RabbitMQ, migrations, autenticação, Docker, CI/CD, backup, GitHub Release e imagens no GHCR.
 
 ## Recursos entregues
 
@@ -9,22 +9,16 @@ Central operacional **mobile-first** para monitorar repositórios públicos e pr
 - Experiência mobile-first com navegação inferior, painel “Mais” e alerta crítico de build.
 - Repositórios públicos e privados por token GitHub granular.
 - Último commit, branch principal, branches, issues, pull requests, releases e Actions.
-- Histórico de até 30 execuções, 100 PRs e 20 releases por repositório.
+- Histórico de execuções, PRs e releases por repositório.
 - Reexecução completa, reexecução somente de jobs com falha e cancelamento de workflow.
-- Sincronização automática a cada 10 minutos e sincronização manual.
-- Webhooks opcionais para atualização praticamente imediata.
-- Alertas de falha, recuperação e nova release.
+- Sincronização automática, manual e por webhook.
 - PWA instalável em celular, tablet e desktop.
-- Interface responsiva, tema claro/escuro e funcionamento visual offline.
-- Token GitHub criptografado no PostgreSQL; nunca devolvido ao navegador.
-- JWT de curta duração e refresh token rotativo/revogável.
-- Senha Argon2 e troca obrigatória no primeiro acesso.
-- Logs estruturados, health checks e métricas Prometheus.
-- Dados demonstrativos removidos automaticamente após conectar uma conta real.
+- Interface responsiva, tema claro/escuro e comportamento offline.
+- Token GitHub criptografado no PostgreSQL e nunca devolvido ao navegador.
+- JWT de curta duração, refresh token rotativo/revogável, Argon2 e troca obrigatória da senha inicial.
+- Logs estruturados, health checks, métricas Prometheus, backup e restauração.
 
 ## Interface v0.2.0
-
-A versão 0.2.0 transforma o prelúdio visual aprovado em contrato de implementação do frontend.
 
 ![Dashboard desktop](docs/previews/argws-git-monitor-dashboard-desktop-v0.2.0.png)
 
@@ -34,13 +28,15 @@ Os critérios, rotas, componentes e larguras de aceitação estão documentados 
 
 ## Instalação direta
 
+Os instaladores usam as imagens prontas do GHCR por padrão. Caso o pull não esteja disponível, realizam automaticamente o build local com o código-fonte.
+
 ### Windows
 
-1. Extraia o ZIP.
+1. Extraia o pacote da GitHub Release.
 2. Abra o Docker Desktop.
-3. Dê duplo clique em `INSTALAR_WINDOWS.bat`.
+3. Execute `INSTALAR_WINDOWS.bat`.
 4. Acesse `http://localhost:8080`.
-5. Abra `CREDENCIAIS_INICIAIS.txt` para consultar o primeiro acesso.
+5. Consulte `CREDENCIAIS_INICIAIS.txt`.
 
 ### Linux
 
@@ -49,23 +45,80 @@ chmod +x INSTALAR_LINUX.sh
 ./INSTALAR_LINUX.sh
 ```
 
-### Docker Compose manual
+### GHCR manual
 
 ```bash
-docker compose up -d --build
+cp .env.example .env
+# Gere os segredos antes de iniciar:
+./scripts/generate-env.sh
+
+docker compose -f compose.yaml -f compose.ghcr.yaml pull
+docker compose -f compose.yaml -f compose.ghcr.yaml up -d --no-build --remove-orphans
 ```
 
-A instalação aplica migrations, cria o administrador, inicia workers e valida a prontidão da stack. Quando `.env` não existe, os instaladores geram segredos criptograficamente aleatórios sem exigir Node.js ou dependências Python no host.
+Também existe uma stack autônoma para Dockge e Portainer:
+
+```bash
+docker compose -f compose.dockge.yaml pull
+docker compose -f compose.dockge.yaml up -d --no-build --remove-orphans
+```
+
+### Build Docker local
+
+```bash
+./scripts/generate-env.sh
+docker compose -f compose.yaml up -d --build --remove-orphans
+```
+
+Para forçar permanentemente o modo local, configure no `.env`:
+
+```dotenv
+INSTALL_SOURCE=local
+IMAGE_TAG=local
+```
+
+A instalação aplica migrations, cria o administrador, inicializa workers e aguarda a prontidão da API. Não é necessário instalar Python, Node.js, PostgreSQL, Redis ou RabbitMQ diretamente no host.
+
+## Imagens Docker
+
+Imagens publicadas pelo workflow `Release e GHCR`:
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api
+ghcr.io/wkarts/argws-git-monitor-web
+```
+
+Tags produzidas:
+
+```text
+latest
+sha-<commit>
+0.2.0
+0.2
+```
+
+Exemplo de pull versionado:
+
+```bash
+docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.0
+docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.0
+```
+
+Pacotes GHCR privados exigem autenticação antes do pull:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin
+```
 
 ## Primeiro acesso e GitHub
 
 1. Entre com as credenciais geradas no pacote.
 2. Troque a senha administrativa.
 3. Abra **Configurações > Nova conexão**.
-4. Cole um token fine-grained do GitHub.
-5. Mantenha **Importar automaticamente** habilitado ou escolha os repositórios manualmente.
+4. Cadastre um token fine-grained do GitHub.
+5. Importe todos os repositórios autorizados ou selecione-os manualmente.
 
-Permissões recomendadas do token:
+Permissões recomendadas:
 
 | Permissão de repositório | Somente monitorar | Operar Actions/webhooks |
 |---|---:|---:|
@@ -75,8 +128,6 @@ Permissões recomendadas do token:
 | Pull requests | leitura | leitura |
 | Issues | leitura | leitura |
 | Webhooks | nenhuma | escrita |
-
-Selecione `All repositories` ou apenas os repositórios desejados. Organizações podem exigir aprovação do administrador.
 
 ## Serviços Docker
 
@@ -88,13 +139,13 @@ Selecione `All repositories` ou apenas os repositórios desejados. Organizaçõe
 | `beat` | Agendador periódico do Celery |
 | `migrate` | Alembic e bootstrap idempotente |
 | `postgres` | Persistência principal |
-| `redis` | Resultados/cache operacional |
+| `redis` | Resultados e cache operacional |
 | `rabbitmq` | Broker das filas |
 
 Portas locais:
 
-- Aplicação: `8080`
-- RabbitMQ Management, apenas em localhost: `15672`
+- Aplicação: `8080`.
+- RabbitMQ Management: `127.0.0.1:15672`.
 - PostgreSQL, Redis e AMQP não são publicados no host.
 
 ## Comandos operacionais
@@ -109,33 +160,38 @@ Portas locais:
 ./scripts/update.sh
 ```
 
-Equivalentes resumidos:
-
-```bash
-docker compose ps
-docker compose logs -f --tail=200
-docker compose restart api worker beat web
-```
-
-## Publicação no GitHub
-
-O pacote não publica `.env`, credenciais, dumps ou caches. Com GitHub CLI autenticado:
-
-```bash
-./scripts/publish-github.sh wkarts/argws-git-monitor private
-```
-
-No Windows, execute `PUBLICAR_GITHUB.bat`. O script cria o repositório privado quando ele ainda não existe, inicializa o Git, cria o primeiro commit e envia a branch `main`.
-
 ## Produção com domínio
 
 ```bash
 ./scripts/configure-domain.sh https://git.seu-dominio.com.br
 ```
 
-Depois, aponte o proxy HTTPS para `http://127.0.0.1:8080`. Para webhooks automáticos, `PUBLIC_BASE_URL` precisa ser uma URL HTTPS pública; sem isso, a sincronização periódica continua funcionando normalmente.
+Depois, aponte o proxy HTTPS para `http://127.0.0.1:8080`. Para webhooks automáticos, `PUBLIC_BASE_URL` precisa ser pública e HTTPS.
 
-Consulte:
+## CI/CD e versionamento
+
+A versão deve permanecer idêntica em:
+
+```text
+VERSION
+backend/pyproject.toml
+frontend/package.json
+```
+
+Ao receber um push na `main`, o workflow:
+
+1. valida backend, frontend, pacote e Docker Compose;
+2. constrói as imagens API e Web para `linux/amd64` e `linux/arm64`;
+3. publica e inspeciona os manifests no GHCR;
+4. atualiza as tags `latest` e `sha-*`;
+5. quando a tag Git da versão ainda não existe, cria `v<versão>`;
+6. publica a GitHub Release com ZIP, TAR.GZ e `SHA256SUMS.txt`.
+
+Versão atual: **0.2.0**. Git tag da release: **v0.2.0**. A tag da imagem Docker é **0.2.0**, sem o prefixo `v`.
+
+Atualizações automáticas de versão do Dependabot estão desativadas para impedir a abertura massiva de PRs. As dependências devem ser atualizadas em manutenção planejada, com validação pela CI.
+
+## Documentação
 
 - `docs/ARQUITETURA.md`
 - `docs/GITHUB.md`
@@ -170,20 +226,13 @@ npm run dev
 npm run build
 ```
 
-Validação completa do pacote:
+Validação completa:
 
 ```bash
 python scripts/validate-package.py
 node scripts/validate-frontend.cjs
 cd backend && pytest --cov=app --cov-fail-under=40
 ```
-
-## Versionamento
-
-Versão atual: **0.2.0**. Tags `v*.*.*` acionam build e publicação das imagens no GHCR:
-
-- `ghcr.io/wkarts/argws-git-monitor-api`
-- `ghcr.io/wkarts/argws-git-monitor-web`
 
 ## Licença
 

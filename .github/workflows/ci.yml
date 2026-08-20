@@ -20,7 +20,7 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
@@ -38,7 +38,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
@@ -50,7 +50,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
@@ -58,5 +58,6 @@ jobs:
       - run: python scripts/validate-package.py
       - run: cp .env.example .env
       - run: docker compose config -q
+      - run: docker compose -f compose.dockge.yaml config -q
       - run: docker build -t argws-git-monitor-api:test backend
       - run: docker build -t argws-git-monitor-web:test frontend
