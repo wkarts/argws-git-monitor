@@ -42,17 +42,17 @@ info "Validando a configuração Docker"
 "${compose[@]}" config -q
 
 if [[ "$INSTALL_SOURCE" == "local" ]]; then
-  info "Construindo as imagens localmente"
-  "${compose[@]}" up -d --build --remove-orphans
+  info "Construindo as imagens locais :latest"
+  "${compose[@]}" up -d --build --force-recreate --remove-orphans
 else
-  info "Baixando as imagens oficiais do GHCR"
+  info "Baixando as imagens oficiais :latest do GHCR"
   if "${compose[@]}" pull; then
-    info "Iniciando a stack com as imagens publicadas"
-    "${compose[@]}" up -d --no-build --remove-orphans
+    info "Iniciando a stack com o digest mais recente"
+    "${compose[@]}" up -d --no-build --force-recreate --remove-orphans
   else
     warning "Não foi possível baixar uma ou mais imagens do GHCR. Será realizado o build local como contingência."
     compose=(docker compose -f compose.yaml)
-    "${compose[@]}" up -d --build --remove-orphans
+    "${compose[@]}" up -d --build --force-recreate --remove-orphans
   fi
 fi
 
@@ -83,5 +83,7 @@ fi
 info "Instalação concluída"
 "${compose[@]}" ps
 printf '\nAplicação: %s\n' "$PUBLIC_URL"
+printf 'Imagens: :latest\n'
+printf 'Versão: lida do próprio aplicativo\n'
 printf 'Credenciais: %s/CREDENCIAIS_INICIAIS.txt\n' "$ROOT"
 printf 'Persistência: %s/data-postgres, %s/data-redis e %s/data-rabbitmq\n\n' "$ROOT" "$ROOT" "$ROOT"
