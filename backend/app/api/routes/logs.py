@@ -6,14 +6,13 @@ import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import DbSession, require_superuser
 from app.models.activity import AuditLog
 from app.models.user import User
-from app.schemas.common import MessageResponse
 from app.schemas.logs import AuditLogRead, LogPurgeRequest, LogPurgeResult, LogSourceRead, LogTailResponse
 from app.services.audit import record_audit
 from app.services.log_center import build_log_bundle, list_sources, purge_rotated_logs, tail_source
@@ -49,8 +48,8 @@ async def tail(
 
 @router.get("/audit", response_model=list[AuditLogRead])
 async def audit_logs(
+    db: DbSession,
     _: User = Depends(require_superuser),
-    db: DbSession = None,
     q: str | None = Query(default=None, max_length=300),
     action: str | None = Query(default=None, max_length=150),
     limit: int = Query(default=300, ge=1, le=2000),
@@ -117,24 +116,44 @@ async def _audit_csv(db: DbSession) -> bytes:
     return buffer.getvalue().encode("utf-8-sig")
 
 
+@router.get("/audit/download")
+async def download_audit(
+    request: Request,
+    db: DbSession,
+    admin: User = Depends(require_superuser),
+):
+    payload = await _audit_csv(db)
+    await record_audit(
+        db,
+        action="admin.audit_downloaded",
+        user_id=admin.id,
+        ip_address=_client_ip(request),
+    )
+    await db.commit()
+    filename = f"argws-git-monitor-audit-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.csv"
+    return Response(
+        content=payload,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/download")
 async def download_logs(
     request: Request,
+    db: DbSession,
     admin: User = Depends(require_superuser),
-    db: DbSession = None,
     source: list[str] = Query(default=[]),
-    include_audit: bool = True,
 ):
-    extra = {"audit/audit.csv": await _audit_csv(db)} if include_audit else None
     try:
-        payload = build_log_bundle(source, extra_files=extra)
+        payload = build_log_bundle(source)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await record_audit(
         db,
         action="admin.logs_downloaded",
         user_id=admin.id,
-        details={"sources": source or ["all"], "include_audit": include_audit},
+        details={"sources": source or ["all"]},
         ip_address=_client_ip(request),
     )
     await db.commit()
@@ -150,8 +169,8 @@ async def download_logs(
 async def purge_logs(
     payload: LogPurgeRequest,
     request: Request,
+    db: DbSession,
     admin: User = Depends(require_superuser),
-    db: DbSession = None,
 ) -> LogPurgeResult:
     if payload.confirmation != "PURGAR LOGS":
         raise HTTPException(status_code=400, detail='Digite exatamente "PURGAR LOGS".')
