@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
-import logging
+
 from sqlalchemy import delete, select
 from sqlalchemy.orm import joinedload
 
@@ -19,17 +20,17 @@ from app.models.github import (
     Repository,
     WorkflowRun,
 )
+from app.models.issue import Issue
 from app.services.github_client import GitHubClient
-from app.services.health import FAILURE_CONCLUSIONS, calculate_repository_health
 from app.services.github_mapping import (
     apply_repository_base,
     parse_github_datetime,
     workflow_duration_seconds,
 )
+from app.services.health import FAILURE_CONCLUSIONS, calculate_repository_health
 from app.services.notifications import create_notification
 
 logger = logging.getLogger(__name__)
-
 
 
 async def sync_connection(
@@ -152,6 +153,23 @@ async def sync_connection(
         raise
 
 
+def _source_state(
+    warnings: dict[str, str],
+    key: str,
+    *,
+    count: int,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    warning = warnings.get(key)
+    return {
+        "observed": warning is None,
+        "count": count,
+        "error": warning,
+        "observed_at": datetime.now(UTC).isoformat(),
+        **(extra or {}),
+    }
+
+
 async def sync_repository(
     repository_id: uuid.UUID | str,
     *,
@@ -178,13 +196,17 @@ async def sync_repository(
         api_url = repository.connection.api_url
 
     github_client = client or GitHubClient(token, api_url=api_url)
+    github_client.optional_warnings.clear()
     try:
         remote_repo = await github_client.get_repository(full_name)
         commits = await github_client.list_commits(full_name, limit=1)
         branches = await github_client.list_branches(full_name, limit=100)
-        workflow_runs = await github_client.list_workflow_runs(full_name, limit=30)
+        workflows = await github_client.list_workflows(full_name, limit=100)
+        workflow_runs = await github_client.list_workflow_runs(full_name, limit=50)
         pull_requests = await github_client.list_pull_requests(full_name, limit=100)
-        releases = await github_client.list_releases(full_name, limit=20)
+        issues = await github_client.list_issues(full_name, limit=100)
+        releases = await github_client.list_releases(full_name, limit=30)
+        warnings = dict(github_client.optional_warnings)
 
         async with session_scope() as session:
             result = await session.execute(
@@ -203,10 +225,7 @@ async def sync_repository(
             apply_repository_base(repository, remote_repo)
             repository.branch_count = len(branches)
             repository.open_pr_count = len(pull_requests)
-            repository.open_issue_count = max(
-                int(remote_repo.get("open_issues_count") or 0) - repository.open_pr_count,
-                0,
-            )
+            repository.open_issue_count = len(issues)
 
             latest_commit = commits[0] if commits else None
             if latest_commit:
@@ -257,6 +276,10 @@ async def sync_repository(
             repository.sync_error = None
             repository.last_synced_at = datetime.now(UTC)
 
+            actions_observed = (
+                "actions_workflows" not in warnings and "actions_runs" not in warnings
+            )
+            ci_configured: bool | None = len(workflows) > 0 if actions_observed else None
             health = calculate_repository_health(
                 archived=repository.archived,
                 disabled=repository.disabled,
@@ -266,12 +289,33 @@ async def sync_repository(
                 latest_workflow_conclusion=repository.latest_workflow_conclusion,
                 open_pr_count=repository.open_pr_count,
                 open_issue_count=repository.open_issue_count,
+                ci_configured=ci_configured,
             )
             repository.health_score = health.score
             repository.health_status = health.status
             repository.extra_data = {
                 **(repository.extra_data or {}),
                 "health_reasons": list(health.reasons),
+                "health_components": health.components,
+                "health_coverage": health.coverage,
+                "sync_sources": {
+                    "commits": _source_state(warnings, "commits", count=len(commits)),
+                    "branches": _source_state(warnings, "branches", count=len(branches)),
+                    "actions": _source_state(
+                        warnings,
+                        "actions_runs" if "actions_runs" in warnings else "actions_workflows",
+                        count=len(workflow_runs),
+                        extra={
+                            "workflow_count": len(workflows),
+                            "run_count": len(workflow_runs),
+                            "observed": actions_observed,
+                            "error": warnings.get("actions_runs") or warnings.get("actions_workflows"),
+                        },
+                    ),
+                    "pull_requests": _source_state(warnings, "pull_requests", count=len(pull_requests)),
+                    "issues": _source_state(warnings, "issues", count=len(issues)),
+                    "releases": _source_state(warnings, "releases", count=len(releases)),
+                },
             }
 
             await session.execute(
@@ -321,6 +365,31 @@ async def sync_repository(
                         github_updated_at=parse_github_datetime(item.get("updated_at")),
                         closed_at=parse_github_datetime(item.get("closed_at")),
                         merged_at=parse_github_datetime(item.get("merged_at")),
+                    )
+                )
+
+            await session.execute(delete(Issue).where(Issue.repository_id == repository.id))
+            for item in issues:
+                labels = [
+                    str(label.get("name") or "")
+                    for label in (item.get("labels") or [])
+                    if isinstance(label, dict) and label.get("name")
+                ]
+                session.add(
+                    Issue(
+                        repository_id=repository.id,
+                        github_id=int(item["id"]),
+                        number=int(item["number"]),
+                        title=str(item.get("title") or "Issue"),
+                        state=str(item.get("state") or "open"),
+                        html_url=str(item.get("html_url") or f"{repository.html_url}/issues"),
+                        user_login=(item.get("user") or {}).get("login"),
+                        comments=int(item.get("comments") or 0),
+                        locked=bool(item.get("locked", False)),
+                        labels_text=", ".join(labels) or None,
+                        github_created_at=parse_github_datetime(item.get("created_at")),
+                        github_updated_at=parse_github_datetime(item.get("updated_at")),
+                        closed_at=parse_github_datetime(item.get("closed_at")),
                     )
                 )
 
@@ -394,6 +463,13 @@ async def sync_repository(
             if repository:
                 repository.sync_error = str(exc)[:4000]
                 repository.last_synced_at = datetime.now(UTC)
+                source_data = (repository.extra_data or {}).get("sync_sources") or {}
+                actions_source = source_data.get("actions") or {}
+                ci_configured = (
+                    int(actions_source.get("workflow_count") or 0) > 0
+                    if actions_source.get("observed") is True
+                    else None
+                )
                 health = calculate_repository_health(
                     archived=repository.archived,
                     disabled=repository.disabled,
@@ -403,6 +479,7 @@ async def sync_repository(
                     latest_workflow_conclusion=repository.latest_workflow_conclusion,
                     open_pr_count=repository.open_pr_count,
                     open_issue_count=repository.open_issue_count,
+                    ci_configured=ci_configured,
                 )
                 repository.health_score = health.score
                 repository.health_status = health.status
