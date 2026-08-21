@@ -38,12 +38,23 @@ def upgrade() -> None:
     user_additions = {
         "job_title": sa.Column("job_title", sa.String(length=160), nullable=True),
         "bio": sa.Column("bio", sa.Text(), nullable=True),
-        "timezone": sa.Column("timezone", sa.String(length=80), nullable=False, server_default="America/Bahia"),
-        "locale": sa.Column("locale", sa.String(length=20), nullable=False, server_default="pt-BR"),
-        "preferences": sa.Column("preferences", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+        "timezone": sa.Column(
+            "timezone",
+            sa.String(length=80),
+            nullable=False,
+            server_default="America/Bahia",
+        ),
+        "locale": sa.Column(
+            "locale", sa.String(length=20), nullable=False, server_default="pt-BR"
+        ),
+        "preferences": sa.Column(
+            "preferences", sa.JSON(), nullable=False, server_default=sa.text("'{}'")
+        ),
         "avatar_mime": sa.Column("avatar_mime", sa.String(length=100), nullable=True),
         "avatar_blob": sa.Column("avatar_blob", sa.LargeBinary(), nullable=True),
-        "avatar_updated_at": sa.Column("avatar_updated_at", sa.DateTime(timezone=True), nullable=True),
+        "avatar_updated_at": sa.Column(
+            "avatar_updated_at", sa.DateTime(timezone=True), nullable=True
+        ),
     }
     for name, column in user_additions.items():
         if name not in user_columns:
@@ -51,10 +62,18 @@ def upgrade() -> None:
 
     repository_columns = _columns("repositories")
     repository_additions = {
-        "last_activity_at": sa.Column("last_activity_at", sa.DateTime(timezone=True), nullable=True),
-        "last_activity_type": sa.Column("last_activity_type", sa.String(length=60), nullable=True),
-        "last_activity_summary": sa.Column("last_activity_summary", sa.String(length=1000), nullable=True),
-        "activity_observed_at": sa.Column("activity_observed_at", sa.DateTime(timezone=True), nullable=True),
+        "last_activity_at": sa.Column(
+            "last_activity_at", sa.DateTime(timezone=True), nullable=True
+        ),
+        "last_activity_type": sa.Column(
+            "last_activity_type", sa.String(length=60), nullable=True
+        ),
+        "last_activity_summary": sa.Column(
+            "last_activity_summary", sa.String(length=1000), nullable=True
+        ),
+        "activity_observed_at": sa.Column(
+            "activity_observed_at", sa.DateTime(timezone=True), nullable=True
+        ),
     }
     for name, column in repository_additions.items():
         if name not in repository_columns:
@@ -78,6 +97,23 @@ def upgrade() -> None:
             )
         )
 
+    # Versões anteriores podiam registrar jobs QUEUED/RUNNING mesmo sem worker
+    # Celery disponível. No upgrade, jobs antigos não podem continuar parecendo
+    # processamento vivo indefinidamente. Só reconciliamos os que já estão parados
+    # há pelo menos 15 minutos; nada é removido e o histórico permanece visível.
+    if "sync_jobs" in _tables():
+        op.execute(
+            sa.text(
+                "UPDATE sync_jobs "
+                "SET status = 'failed', "
+                "message = 'Job antigo reconciliado durante upgrade da fila operacional.', "
+                "error = COALESCE(error, 'Job abandonado: não houve confirmação de worker. Use Repetir após validar a stack.'), "
+                "completed_at = COALESCE(completed_at, now()) "
+                "WHERE status IN ('queued', 'running') "
+                "AND created_at < now() - interval '15 minutes'"
+            )
+        )
+
     tables = _tables()
     if "issues" not in tables:
         op.create_table(
@@ -96,13 +132,21 @@ def upgrade() -> None:
             sa.Column("github_created_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("github_updated_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
-            sa.ForeignKeyConstraint(["repository_id"], ["repositories.id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(
+                ["repository_id"], ["repositories.id"], ondelete="CASCADE"
+            ),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("repository_id", "github_id", name="uq_issues_repo_github"),
+            sa.UniqueConstraint(
+                "repository_id", "github_id", name="uq_issues_repo_github"
+            ),
         )
         op.create_index("ix_issues_repository_id", "issues", ["repository_id"])
-        op.create_index("ix_issues_repo_updated", "issues", ["repository_id", "github_updated_at"])
-        op.create_index("ix_issues_repo_state", "issues", ["repository_id", "state"])
+        op.create_index(
+            "ix_issues_repo_updated", "issues", ["repository_id", "github_updated_at"]
+        )
+        op.create_index(
+            "ix_issues_repo_state", "issues", ["repository_id", "state"]
+        )
 
     tables = _tables()
     if "inactivity_policies" not in tables:
@@ -112,19 +156,52 @@ def upgrade() -> None:
             sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
             sa.Column("name", sa.String(length=160), nullable=False),
             sa.Column("description", sa.Text(), nullable=True),
-            sa.Column("timeout_value", sa.Integer(), nullable=False, server_default="30"),
-            sa.Column("timeout_unit", sa.String(length=20), nullable=False, server_default="days"),
-            sa.Column("action", sa.String(length=30), nullable=False, server_default="private"),
-            sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
-            sa.Column("activity_sources", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+            sa.Column(
+                "timeout_value", sa.Integer(), nullable=False, server_default="30"
+            ),
+            sa.Column(
+                "timeout_unit",
+                sa.String(length=20),
+                nullable=False,
+                server_default="days",
+            ),
+            sa.Column(
+                "action",
+                sa.String(length=30),
+                nullable=False,
+                server_default="private",
+            ),
+            sa.Column(
+                "enabled", sa.Boolean(), nullable=False, server_default=sa.true()
+            ),
+            sa.Column(
+                "activity_sources",
+                sa.JSON(),
+                nullable=False,
+                server_default=sa.text("'[]'"),
+            ),
             sa.Column("last_evaluated_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("now()"),
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                nullable=False,
+                server_default=sa.text("now()"),
+            ),
             sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("user_id", "name", name="uq_inactivity_policies_user_name"),
+            sa.UniqueConstraint(
+                "user_id", "name", name="uq_inactivity_policies_user_name"
+            ),
         )
-        op.create_index("ix_inactivity_policies_user_id", "inactivity_policies", ["user_id"])
+        op.create_index(
+            "ix_inactivity_policies_user_id", "inactivity_policies", ["user_id"]
+        )
         op.create_index(
             "ix_inactivity_policies_user_enabled",
             "inactivity_policies",
@@ -138,8 +215,12 @@ def upgrade() -> None:
             sa.Column("policy_id", postgresql.UUID(as_uuid=True), nullable=False),
             sa.Column("repository_id", postgresql.UUID(as_uuid=True), nullable=False),
             sa.Column("added_at", sa.DateTime(timezone=True), nullable=False),
-            sa.ForeignKeyConstraint(["policy_id"], ["inactivity_policies.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["repository_id"], ["repositories.id"], ondelete="CASCADE"),
+            sa.ForeignKeyConstraint(
+                ["policy_id"], ["inactivity_policies.id"], ondelete="CASCADE"
+            ),
+            sa.ForeignKeyConstraint(
+                ["repository_id"], ["repositories.id"], ondelete="CASCADE"
+            ),
             sa.PrimaryKeyConstraint("policy_id", "repository_id"),
         )
         op.create_index(
@@ -162,15 +243,29 @@ def upgrade() -> None:
             sa.Column("last_activity_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("threshold_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("reason", sa.Text(), nullable=False),
-            sa.Column("result", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column(
+                "result", sa.JSON(), nullable=False, server_default=sa.text("'{}'")
+            ),
             sa.Column("error", sa.Text(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-            sa.ForeignKeyConstraint(["policy_id"], ["inactivity_policies.id"], ondelete="SET NULL"),
-            sa.ForeignKeyConstraint(["repository_id"], ["repositories.id"], ondelete="SET NULL"),
+            sa.ForeignKeyConstraint(
+                ["policy_id"], ["inactivity_policies.id"], ondelete="SET NULL"
+            ),
+            sa.ForeignKeyConstraint(
+                ["repository_id"], ["repositories.id"], ondelete="SET NULL"
+            ),
             sa.PrimaryKeyConstraint("id"),
         )
-        op.create_index("ix_inactivity_action_logs_policy_id", "inactivity_action_logs", ["policy_id"])
-        op.create_index("ix_inactivity_action_logs_repository_id", "inactivity_action_logs", ["repository_id"])
+        op.create_index(
+            "ix_inactivity_action_logs_policy_id",
+            "inactivity_action_logs",
+            ["policy_id"],
+        )
+        op.create_index(
+            "ix_inactivity_action_logs_repository_id",
+            "inactivity_action_logs",
+            ["repository_id"],
+        )
         op.create_index(
             "ix_inactivity_action_logs_policy_created",
             "inactivity_action_logs",
