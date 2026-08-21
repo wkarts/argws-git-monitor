@@ -1,6 +1,6 @@
 # Deploy pelo Dockge
 
-Este diretório é uma stack completa e independente para o Dockge. Ele usa as imagens publicadas no GHCR e não contém blocos de build.
+Este diretório é uma stack completa e independente para o Dockge. Ele usa sempre as imagens `:latest` publicadas no GHCR e não contém blocos de build.
 
 ## Conteúdo
 
@@ -10,6 +10,17 @@ compose.yaml
 generate-env.sh
 deploy.sh
 ```
+
+## Regra de atualização
+
+Não configure `APP_VERSION` nem `IMAGE_TAG` no `.env`.
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api:latest
+ghcr.io/wkarts/argws-git-monitor-web:latest
+```
+
+A versão exibida pela aplicação é detectada internamente pelo backend e pelo frontend. Para atualizar no Dockge, execute **Pull** e depois **Update/Deploy**. O `deploy.sh` faz pull e força a recriação dos containers.
 
 ## Persistência dentro da stack
 
@@ -53,11 +64,12 @@ Depois, abra o Dockge e selecione a stack `argws-git-monitor`.
 2. Cole o conteúdo de `compose.yaml`.
 3. Coloque o `.env` no diretório físico da stack ou cadastre as variáveis no Dockge.
 4. Confirme que as fontes dos volumes começam com `./data-`.
-5. Execute **Pull** e **Deploy**.
-6. Aguarde `migrate` terminar com código zero.
-7. Confirme os serviços saudáveis.
+5. Execute **Pull**.
+6. Execute **Update/Deploy** para recriar os containers.
+7. Aguarde `migrate` terminar com código zero.
+8. Confirme os serviços saudáveis.
 
-## Atualização de versões anteriores
+## Migração de versões antigas
 
 Antes de atualizar uma stack que ainda usa volumes nomeados:
 
@@ -73,13 +85,14 @@ Quando o script comum não estiver no diretório pai, execute-o a partir do paco
 
 ```bash
 docker compose --env-file .env -f compose.yaml pull
-docker compose --env-file .env -f compose.yaml up -d --no-build --remove-orphans
+docker compose --env-file .env -f compose.yaml up -d --no-build --force-recreate --remove-orphans
 ```
 
 ## Verificação
 
 ```bash
 docker compose --env-file .env -f compose.yaml ps
+docker compose --env-file .env -f compose.yaml images
 docker compose --env-file .env -f compose.yaml logs --tail=200 migrate api web
 curl -fsS http://127.0.0.1:8080/api/v1/health/ready
 ```
