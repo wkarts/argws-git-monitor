@@ -27,23 +27,26 @@ if [[ ! -f .env ]]; then
   bash generate-env.sh
 fi
 
-docker compose --env-file .env -f compose.local.yaml config -q
-docker compose --env-file .env -f compose.local.yaml up -d --build --remove-orphans
+compose=(docker compose --env-file .env -f compose.local.yaml)
+"${compose[@]}" config -q
+"${compose[@]}" up -d --build --force-recreate --remove-orphans
 
 PORT="$(awk -F= '$1 == "APP_HTTP_PORT" {print $2; exit}' .env)"
 PORT="${PORT:-8080}"
 
 for _ in $(seq 1 90); do
   if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/v1/health/ready" >/dev/null 2>&1; then
-    docker compose --env-file .env -f compose.local.yaml ps
+    "${compose[@]}" ps
     echo "ARGWS Git Monitor disponível em http://127.0.0.1:${PORT}"
+    echo "Imagens locais: :latest"
+    echo "Versão: obtida automaticamente do próprio aplicativo"
     echo "Dados em $ROOT/data-postgres, $ROOT/data-redis e $ROOT/data-rabbitmq"
     exit 0
   fi
   sleep 2
 done
 
-docker compose --env-file .env -f compose.local.yaml ps
-docker compose --env-file .env -f compose.local.yaml logs --tail=150 migrate api web >&2 || true
+"${compose[@]}" ps
+"${compose[@]}" logs --tail=150 migrate api web >&2 || true
 echo "A aplicação não ficou pronta dentro do tempo esperado." >&2
 exit 1
