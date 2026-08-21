@@ -38,13 +38,27 @@ x-api-service: &api-service
   environment: *app-environment
   volumes:
     - ./data-logs:/var/log/argws-stack
-  networks:
-    - gitmonitor
-  security_opt:
-    - no-new-privileges:true
+  networks: [gitmonitor]
+  security_opt: ["no-new-privileges:true"]
   init: true
 
 services:
+  logs-init:
+    image: alpine:3.21
+    restart: "no"
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - |
+        for dir in api worker beat migrate web postgres redis rabbitmq; do
+          mkdir -p "/logs/$dir"
+        done
+        chmod -R a+rwx /logs
+    volumes:
+      - ./data-logs:/logs
+    security_opt: ["no-new-privileges:true"]
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -56,16 +70,16 @@ services:
     volumes:
       - ./data-postgres:/var/lib/postgresql/data
       - ./data-logs/postgres:/var/log/postgresql
-    networks:
-      - gitmonitor
+    networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gitmonitor} -d ${POSTGRES_DB:-gitmonitor}"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 10s
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
 
   redis:
     image: redis:7.4-alpine
@@ -74,15 +88,15 @@ services:
     volumes:
       - ./data-redis:/data
       - ./data-logs/redis:/var/log/redis
-    networks:
-      - gitmonitor
+    networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
 
   rabbitmq:
     image: rabbitmq:4-management-alpine
@@ -97,16 +111,16 @@ services:
       - ./data-logs/rabbitmq:/var/log/rabbitmq
     ports:
       - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
-    networks:
-      - gitmonitor
+    networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 8s
       retries: 12
       start_period: 20s
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
 
   migrate:
     <<: *api-service
@@ -116,11 +130,9 @@ services:
       <<: *app-environment
       SERVICE_ROLE: migrate
       LOG_FILE: /var/log/argws-stack/migrate/migrate.log
-    healthcheck:
-      disable: true
+    healthcheck: { disable: true }
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres: { condition: service_healthy }
 
   api:
     <<: *api-service
@@ -132,12 +144,9 @@ services:
       LOG_FILE: /var/log/argws-stack/api/api.log
       API_WORKERS: ${API_WORKERS:-2}
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
   worker:
     <<: *api-service
@@ -149,15 +158,11 @@ services:
       LOG_FILE: /var/log/argws-stack/worker/worker.log
       CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-2}
       CELERY_MAX_TASKS_PER_CHILD: ${CELERY_MAX_TASKS_PER_CHILD:-100}
-    healthcheck:
-      disable: true
+    healthcheck: { disable: true }
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
   beat:
     <<: *api-service
@@ -167,15 +172,11 @@ services:
       <<: *app-environment
       SERVICE_ROLE: beat
       LOG_FILE: /var/log/argws-stack/beat/beat.log
-    healthcheck:
-      disable: true
+    healthcheck: { disable: true }
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
   web:
     image: ${WEB_IMAGE:-argws-git-monitor-web}:latest
@@ -189,13 +190,10 @@ services:
       - ./data-logs/web:/var/log/nginx
     ports:
       - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_HTTP_PORT:-8080}:80"
-    networks:
-      - gitmonitor
+    networks: [gitmonitor]
     depends_on:
-      api:
-        condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
+      api: { condition: service_healthy }
+    security_opt: ["no-new-privileges:true"]
 
 networks:
   gitmonitor:
