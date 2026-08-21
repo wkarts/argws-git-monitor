@@ -16,6 +16,7 @@ from app.api.routes import (
     auth,
     dashboard,
     github,
+    github_diagnostics,
     github_tools,
     inactivity,
     jobs,
@@ -116,6 +117,7 @@ app.include_router(admin.router, prefix=settings.api_v1_prefix)
 app.include_router(logs.router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
 app.include_router(github.router, prefix=settings.api_v1_prefix)
+app.include_router(github_diagnostics.router, prefix=settings.api_v1_prefix)
 app.include_router(github_tools.router, prefix=settings.api_v1_prefix)
 app.include_router(inactivity.router, prefix=settings.api_v1_prefix)
 app.include_router(jobs.router, prefix=settings.api_v1_prefix)
