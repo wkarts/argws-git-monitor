@@ -30,8 +30,8 @@ EXPECTED_OPERATIONAL_PATHS = {
     "/api/v1/operations/pull-requests",
     "/api/v1/operations/releases",
     "/api/v1/operations/issues",
-    "/api/v1/inactivity/policies",
-    "/api/v1/inactivity/evaluate",
+    "/api/v1/inactivity-policies",
+    "/api/v1/inactivity-policies/evaluate-all",
     "/api/v1/jobs",
     "/api/v1/jobs/overview",
     "/api/v1/notifications",
@@ -61,8 +61,8 @@ def test_openapi_exposes_v040_control_center_operations() -> None:
     assert "get" in paths["/api/v1/operations/releases"]
     assert "get" in paths["/api/v1/operations/issues"]
     assert "post" in paths["/api/v1/operations/issues"]
-    assert "get" in paths["/api/v1/inactivity/policies"]
-    assert "post" in paths["/api/v1/inactivity/evaluate"]
+    assert "get" in paths["/api/v1/inactivity-policies"]
+    assert "post" in paths["/api/v1/inactivity-policies/evaluate-all"]
     assert "get" in paths["/api/v1/jobs"]
     assert "get" in paths["/api/v1/jobs/overview"]
     assert "get" in paths["/api/v1/admin/users"]
