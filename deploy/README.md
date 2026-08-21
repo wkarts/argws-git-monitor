@@ -34,6 +34,25 @@ deploy/
     └── deploy-local.sh
 ```
 
+## Regra de versão e imagens
+
+Os modelos de deploy **não recebem versão da aplicação** e **não possuem `IMAGE_TAG`**.
+
+- GHCR usa sempre `:latest`;
+- build local gera imagens `:latest`;
+- a API descobre sua versão pelo metadata do pacote Python;
+- o frontend injeta sua versão diretamente do `frontend/package.json` no build;
+- `VERSION`, `backend/pyproject.toml` e `frontend/package.json` são usados pelo processo de release, não pelo ambiente de produção.
+
+Imagens de deploy:
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api:latest
+ghcr.io/wkarts/argws-git-monitor-web:latest
+```
+
+Ao atualizar uma stack, faça **Pull + recriação dos containers**. Os scripts `deploy.sh` e `deploy-ghcr.sh` já executam `--force-recreate` para evitar que um container antigo continue em execução depois do pull.
+
 ## Escolha rápida
 
 | Ambiente | Diretório | Finalidade |
@@ -82,15 +101,6 @@ bash deploy/migrate-named-volumes.sh --stack-dir /caminho/da/stack
 ```
 
 O migrador copia os dados para `./data-*` e preserva os volumes antigos para rollback.
-
-## Imagens oficiais v0.3.0
-
-```text
-ghcr.io/wkarts/argws-git-monitor-api:0.3.0
-ghcr.io/wkarts/argws-git-monitor-web:0.3.0
-```
-
-Também são publicadas `latest`, `0.3` e `sha-<commit>`.
 
 ## Segurança
 
