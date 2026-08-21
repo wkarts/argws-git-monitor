@@ -8,6 +8,11 @@ from app.core.logging import configure_logging
 configure_logging()
 settings = get_settings()
 
+# A reconciliação completa consulta vários recursos por repositório. Para contas
+# grandes, intervalos de poucos minutos esgotam o rate limit REST. Webhooks cobrem
+# mudanças imediatas; o full-sync fica como reconciliação horária mínima.
+FULL_SYNC_INTERVAL_SECONDS = max(float(settings.sync_interval_seconds), 3600.0)
+
 celery_app = Celery(
     "argws_git_monitor",
     broker=settings.celery_broker_url,
@@ -29,7 +34,7 @@ celery_app.conf.update(
     beat_schedule={
         "sync-all-github-connections": {
             "task": "github.sync_all_connections",
-            "schedule": float(settings.sync_interval_seconds),
+            "schedule": FULL_SYNC_INTERVAL_SECONDS,
         },
         "evaluate-inactivity-policies": {
             "task": "inactivity.evaluate_all",
