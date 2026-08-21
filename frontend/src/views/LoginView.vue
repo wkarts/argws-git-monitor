@@ -56,7 +56,6 @@ async function submit(): Promise<void> {
         <div class="form-heading">
           <span>Acesso administrativo</span>
           <h2>Bem-vindo ao Git Monitor</h2>
-          <p>Use as credenciais presentes no arquivo <code>CREDENCIAIS_INICIAIS.txt</code> do pacote.</p>
         </div>
 
         <div v-if="errorMessage" class="form-error" role="alert">{{ errorMessage }}</div>
@@ -113,8 +112,6 @@ h1 { max-width:650px; margin:0; color:white; font-size:clamp(2.35rem,5vw,4.8rem)
 .form-heading { display:grid; gap:.42rem; margin-bottom:.35rem; }
 .form-heading > span { color:var(--primary-strong); font-size:.68rem; font-weight:800; letter-spacing:.12em; }
 h2 { margin:0; color:var(--text-strong); font-size:1.55rem; letter-spacing:-.02em; }
-.form-heading p { margin:0; color:var(--text-muted); font-size:.76rem; line-height:1.45; }
-.form-heading code { color:var(--text); font-size:.68rem; }
 .form-error { padding:.72rem .8rem; color:var(--danger); font-size:.76rem; border:1px solid color-mix(in srgb,var(--danger) 28%,var(--border)); border-radius:.72rem; background:color-mix(in srgb,var(--danger) 8%,var(--surface)); }
 .security-note { display:flex; align-items:center; justify-content:center; gap:.4rem; margin:.1rem 0 0; color:var(--text-subtle); font-size:.68rem; }
 footer { color:var(--text-subtle); font-size:.65rem; }
