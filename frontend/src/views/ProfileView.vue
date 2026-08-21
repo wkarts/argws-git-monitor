@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Camera, CheckCircle2, ImageOff, Save, ShieldCheck, Trash2, UserRound } from 'lucide-vue-next'
+import { Camera, CheckCircle2, ImageOff, Save, ShieldCheck, UserRound } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
