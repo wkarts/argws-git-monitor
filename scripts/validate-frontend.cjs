@@ -60,9 +60,6 @@ for (const file of walk(sourceRoot).filter((item) =>
       continue
     }
     source = scriptMatch[1]
-    // Não tente capturar o template com regex não-gulosa: componentes Vue podem
-    // conter <template v-if/v-else> aninhados. Remover apenas o bloco script
-    // deixa todo o template disponível para detectar componentes usados.
     template = whole.replace(scriptMatch[0], '')
   }
 
@@ -111,9 +108,9 @@ for (const file of walk(sourceRoot).filter((item) =>
   checked += 1
 }
 
-// Contrato visual: a navegação deve ocupar o espaço intermediário da sidebar e
-// o card de monitoramento deve ficar ancorado no rodapé. Isso impede regressões
-// quando novos itens de menu forem adicionados.
+// Contrato visual: a navegação ocupa o espaço intermediário; o monitor fica no
+// rodapé tanto expandido quanto recolhido. No modo recolhido, o botão de toggle
+// não pode disputar largura com o logo.
 const sidebarLayoutPath = path.join(sourceRoot, 'assets', 'sidebar-layout.css')
 if (!fs.existsSync(sidebarLayoutPath)) {
   console.error(`${sidebarLayoutPath}: contrato de layout da sidebar ausente.`)
@@ -126,6 +123,18 @@ if (!fs.existsSync(sidebarLayoutPath)) {
   }
   if (!/\.sidebar\s+\.sidebar-monitor[\s\S]*?margin-top:\s*auto/i.test(css)) {
     console.error(`${sidebarLayoutPath}: sidebar-monitor precisa permanecer ancorado no rodapé.`)
+    failed = true
+  }
+  if (!/\.sidebar-is-collapsed\s+\.sidebar\s+\.sidebar-monitor[\s\S]*?display:\s*flex\s*!important/i.test(css)) {
+    console.error(`${sidebarLayoutPath}: monitor compacto não pode desaparecer com a sidebar recolhida.`)
+    failed = true
+  }
+  if (!/\.sidebar-is-collapsed\s+\.sidebar\s+\.sidebar-toggle[\s\S]*?position:\s*absolute\s*!important/i.test(css)) {
+    console.error(`${sidebarLayoutPath}: toggle recolhido precisa ficar ancorado fora do fluxo do logo.`)
+    failed = true
+  }
+  if (!/\.sidebar-is-collapsed\s+\.sidebar\s+\.sidebar-toggle[\s\S]*?right:\s*-1\.6rem/i.test(css)) {
+    console.error(`${sidebarLayoutPath}: toggle recolhido precisa permanecer alinhado à borda direita.`)
     failed = true
   }
 }
