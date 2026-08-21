@@ -32,7 +32,7 @@ class GitHubConnectionRead(ORMModel):
     created_at: datetime
     repository_count: int = 0
     available_repository_count: int = 0
-    oauth_scopes: list[str] = []
+    oauth_scopes: list[str] = Field(default_factory=list)
 
 
 class GitHubRemoteRepository(BaseModel):
@@ -47,7 +47,7 @@ class GitHubRemoteRepository(BaseModel):
     default_branch: str
     language: str | None = None
     selected: bool = False
-    permissions: dict[str, bool] = {}
+    permissions: dict[str, bool] = Field(default_factory=dict)
 
 
 class RepositoryImportRequest(BaseModel):
