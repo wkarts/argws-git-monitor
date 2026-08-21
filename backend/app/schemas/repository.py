@@ -97,6 +97,10 @@ class RepositoryRead(ORMModel):
     latest_workflow_conclusion: str | None
     latest_workflow_url: str | None
     latest_workflow_at: datetime | None
+    last_activity_at: datetime | None
+    last_activity_type: str | None
+    last_activity_summary: str | None
+    activity_observed_at: datetime | None
     health_score: int
     health_status: HealthStatus
     health_coverage: int = 0
