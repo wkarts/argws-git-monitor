@@ -19,7 +19,7 @@ EXPECTED_OPERATIONAL_PATHS = {
     "/api/v1/github/connections/{connection_id}/remote-repositories",
     "/api/v1/github/connections/{connection_id}/import",
     "/api/v1/github/connections/{connection_id}/repositories",
-    "/api/v1/github/diagnostics",
+    "/api/v1/github/connections/{connection_id}/diagnostics",
     "/api/v1/repositories",
     "/api/v1/repositories/{repository_id}",
     "/api/v1/repositories/{repository_id}/github",
@@ -54,6 +54,7 @@ def test_openapi_exposes_v040_control_center_operations() -> None:
     assert "post" in paths["/api/v1/auth/2fa/setup"]
     assert "patch" in paths["/api/v1/auth/profile"]
     assert "post" in paths["/api/v1/auth/avatar"]
+    assert "get" in paths["/api/v1/github/connections/{connection_id}/diagnostics"]
     assert "get" in paths["/api/v1/operations/status"]
     assert "get" in paths["/api/v1/operations/actions"]
     assert "get" in paths["/api/v1/operations/pull-requests"]
