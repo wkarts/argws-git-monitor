@@ -45,6 +45,15 @@ def upgrade() -> None:
         if name not in repository_columns:
             op.add_column("repositories", column)
 
+    repository_indexes = _indexes("repositories")
+    if "ix_repositories_last_activity" not in repository_indexes:
+        op.create_index(
+            "ix_repositories_last_activity",
+            "repositories",
+            ["last_activity_at"],
+            unique=False,
+        )
+
     if "health_score" in _columns("repositories"):
         op.alter_column("repositories", "health_score", server_default=sa.text("0"))
         op.execute(
@@ -68,8 +77,8 @@ def upgrade() -> None:
             sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
             sa.Column("activity_sources", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
             sa.Column("last_evaluated_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
             sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("user_id", "name", name="uq_inactivity_policies_user_name"),
@@ -91,7 +100,6 @@ def upgrade() -> None:
             sa.ForeignKeyConstraint(["policy_id"], ["inactivity_policies.id"], ondelete="CASCADE"),
             sa.ForeignKeyConstraint(["repository_id"], ["repositories.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("policy_id", "repository_id"),
-            sa.UniqueConstraint("policy_id", "repository_id", name="uq_inactivity_policy_repository"),
         )
         op.create_index(
             "ix_inactivity_policy_repositories_repository",
@@ -160,6 +168,9 @@ def downgrade() -> None:
     ):
         if table in tables:
             op.drop_table(table)
+    repository_indexes = _indexes("repositories")
+    if "ix_repositories_last_activity" in repository_indexes:
+        op.drop_index("ix_repositories_last_activity", table_name="repositories")
     repository_columns = _columns("repositories")
     for name in (
         "activity_observed_at",
