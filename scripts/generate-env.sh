@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="$(tr -d '\r\n' < "$ROOT/VERSION")"
 FORCE=false
 PORT=8080
 while [[ $# -gt 0 ]]; do
@@ -42,7 +41,6 @@ URL="http://localhost:${PORT}"
 cat > "$ENV_PATH" <<EOF
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=${VERSION}
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -73,7 +71,6 @@ NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
 CELERY_CONCURRENCY=2
 CELERY_MAX_TASKS_PER_CHILD=100
-IMAGE_TAG=latest
 INSTALL_SOURCE=ghcr
 EOF
 
@@ -92,6 +89,7 @@ Senha:     ${RABBIT_PASSWORD}
 A aplicação exige a troca da senha administrativa no primeiro acesso.
 Este arquivo e o .env estão ignorados pelo Git.
 Dados persistentes: ./data-postgres, ./data-redis e ./data-rabbitmq.
+As imagens GHCR usam sempre :latest e a versão é lida do próprio aplicativo.
 EOF
 chmod 600 "$ENV_PATH" "$CREDENTIALS_PATH" 2>/dev/null || true
 printf 'Segredos gerados em %s\nCredenciais gravadas em %s\n' "$ENV_PATH" "$CREDENTIALS_PATH"
