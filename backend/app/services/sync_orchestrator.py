@@ -10,7 +10,8 @@ from app.core.config import get_settings
 from app.core.database import session_scope
 from app.models.activity import SyncJob
 from app.models.github import Repository
-from app.services.github_sync import sync_connection, sync_repository
+from app.services.activity_observer import sync_repository_with_activity
+from app.services.github_sync import sync_connection
 
 
 async def _set_progress(
@@ -40,11 +41,7 @@ async def sync_connection_with_progress(
     selected_github_ids: set[int] | None = None,
     job_id: uuid.UUID | str | None = None,
 ) -> dict[str, Any]:
-    """Descobre o catálogo e sincroniza repositórios com progresso observável.
-
-    Um único job representa uma seleção inteira, evitando centenas de mensagens
-    pendentes para uma única ação do usuário.
-    """
+    """Descobre o catálogo e sincroniza dados + atividade com progresso observável."""
 
     connection_uuid = uuid.UUID(str(connection_id))
     job_uuid = uuid.UUID(str(job_id)) if job_id else None
@@ -86,9 +83,9 @@ async def sync_connection_with_progress(
         nonlocal progress, synced
         async with semaphore:
             try:
-                await sync_repository(repository_id)
+                await sync_repository_with_activity(repository_id)
                 synced += 1
-            except Exception as exc:  # erro fica registrado também no repositório
+            except Exception as exc:
                 errors.append({"repository": full_name, "error": str(exc)[:500]})
             finally:
                 async with progress_lock:
