@@ -33,7 +33,6 @@ class InactivityPolicy(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class InactivityPolicyRepository(Base):
     __tablename__ = "inactivity_policy_repositories"
     __table_args__ = (
-        UniqueConstraint("policy_id", "repository_id", name="uq_inactivity_policy_repository"),
         Index("ix_inactivity_policy_repositories_repository", "repository_id"),
     )
 
