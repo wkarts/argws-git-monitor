@@ -10,6 +10,17 @@ stack.env.example
 generate-stack-env.sh
 ```
 
+## Regra de versão
+
+Não cadastre `APP_VERSION` nem `IMAGE_TAG` no Portainer. A stack usa sempre:
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api:latest
+ghcr.io/wkarts/argws-git-monitor-web:latest
+```
+
+A versão exibida no produto é fornecida pelo próprio backend/frontend.
+
 ## Persistência relativa ao diretório da stack
 
 Os serviços persistentes utilizam:
@@ -62,9 +73,10 @@ As variáveis continuam sendo cadastradas em **Environment variables**.
 ## Atualização
 
 1. abra a stack;
-2. confirme `IMAGE_TAG=0.2.3`;
-3. habilite o repull das imagens;
-4. clique em **Update the stack**.
+2. **não altere número de versão**;
+3. habilite **Re-pull image / Always pull image**;
+4. clique em **Update the stack**;
+5. confirme que API e Web foram recriadas usando `:latest`.
 
 Uma instalação anterior baseada em volumes nomeados deve ser migrada pelo shell do host antes do redeploy:
 
@@ -80,6 +92,7 @@ O script mantém os volumes antigos intactos.
 
 ```bash
 docker ps --filter label=com.docker.compose.project=argws-git-monitor
+docker inspect --format '{{.Config.Image}}' argws-git-monitor-web-1
 curl -fsS http://127.0.0.1:8080/api/v1/health/ready
 ```
 
