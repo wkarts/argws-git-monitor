@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.5 — 2026-08-21
+
+- confirma por logs de produção que repositórios sob restrição legal podem recusar também o `DELETE` com HTTP 451;
+- mantém a exclusão remota bloqueada quando o GitHub retorna 451, sem tentar contornar a restrição;
+- adiciona ação explícita **Remover somente do Git Monitor** com confirmação forte `REMOVER DO MONITOR owner/repo`;
+- remove apenas o cadastro local e seus dados derivados, preservando o repositório remoto intacto;
+- grava auditoria da limpeza local e informa claramente que suporte do GitHub continua necessário para remover da conta;
+- adiciona atalho para o portal oficial de suporte do GitHub na tela de Conformidade;
+- diferencia visualmente exclusão remota de limpeza local para evitar a impressão de que um HTTP 451 foi resolvido no GitHub.
+
 ## 0.3.1 — 2026-08-21
 
 - remove `APP_VERSION` de todos os modelos de ambiente e Compose;
