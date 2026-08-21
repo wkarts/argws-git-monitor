@@ -1,4 +1,4 @@
-"""Atividade observada, saúde explicável e automação por inatividade.
+"""Atividade observada, saúde explicável, perfil e automação por inatividade.
 
 Revision ID: 0003_activity_automation
 Revises: 0002_control_center
@@ -34,14 +34,29 @@ def _indexes(table_name: str) -> set[str]:
 
 
 def upgrade() -> None:
+    user_columns = _columns("users")
+    user_additions = {
+        "job_title": sa.Column("job_title", sa.String(length=160), nullable=True),
+        "bio": sa.Column("bio", sa.Text(), nullable=True),
+        "timezone": sa.Column("timezone", sa.String(length=80), nullable=False, server_default="America/Bahia"),
+        "locale": sa.Column("locale", sa.String(length=20), nullable=False, server_default="pt-BR"),
+        "preferences": sa.Column("preferences", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+        "avatar_mime": sa.Column("avatar_mime", sa.String(length=100), nullable=True),
+        "avatar_blob": sa.Column("avatar_blob", sa.LargeBinary(), nullable=True),
+        "avatar_updated_at": sa.Column("avatar_updated_at", sa.DateTime(timezone=True), nullable=True),
+    }
+    for name, column in user_additions.items():
+        if name not in user_columns:
+            op.add_column("users", column)
+
     repository_columns = _columns("repositories")
-    additions = {
+    repository_additions = {
         "last_activity_at": sa.Column("last_activity_at", sa.DateTime(timezone=True), nullable=True),
         "last_activity_type": sa.Column("last_activity_type", sa.String(length=60), nullable=True),
         "last_activity_summary": sa.Column("last_activity_summary", sa.String(length=1000), nullable=True),
         "activity_observed_at": sa.Column("activity_observed_at", sa.DateTime(timezone=True), nullable=True),
     }
-    for name, column in additions.items():
+    for name, column in repository_additions.items():
         if name not in repository_columns:
             op.add_column("repositories", column)
 
@@ -62,6 +77,32 @@ def upgrade() -> None:
                 "WHERE last_synced_at IS NULL OR health_status = 'unknown'"
             )
         )
+
+    tables = _tables()
+    if "issues" not in tables:
+        op.create_table(
+            "issues",
+            sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("repository_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column("github_id", sa.BigInteger(), nullable=False),
+            sa.Column("number", sa.Integer(), nullable=False),
+            sa.Column("title", sa.String(length=1000), nullable=False),
+            sa.Column("state", sa.String(length=30), nullable=False),
+            sa.Column("html_url", sa.String(length=1000), nullable=False),
+            sa.Column("user_login", sa.String(length=255), nullable=True),
+            sa.Column("comments", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column("locked", sa.Boolean(), nullable=False, server_default=sa.false()),
+            sa.Column("labels_text", sa.Text(), nullable=True),
+            sa.Column("github_created_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("github_updated_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
+            sa.ForeignKeyConstraint(["repository_id"], ["repositories.id"], ondelete="CASCADE"),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("repository_id", "github_id", name="uq_issues_repo_github"),
+        )
+        op.create_index("ix_issues_repository_id", "issues", ["repository_id"])
+        op.create_index("ix_issues_repo_updated", "issues", ["repository_id", "github_updated_at"])
+        op.create_index("ix_issues_repo_state", "issues", ["repository_id", "state"])
 
     tables = _tables()
     if "inactivity_policies" not in tables:
@@ -141,6 +182,20 @@ def upgrade() -> None:
             ["repository_id", "created_at"],
         )
 
+    current_user_columns = _columns("users")
+    if "timezone" in current_user_columns:
+        op.alter_column("users", "timezone", server_default=None)
+    if "locale" in current_user_columns:
+        op.alter_column("users", "locale", server_default=None)
+    if "preferences" in current_user_columns:
+        op.alter_column("users", "preferences", server_default=None)
+
+    current_issue_columns = _columns("issues")
+    if "comments" in current_issue_columns:
+        op.alter_column("issues", "comments", server_default=None)
+    if "locked" in current_issue_columns:
+        op.alter_column("issues", "locked", server_default=None)
+
     for table in ("inactivity_policies", "inactivity_action_logs"):
         if table in _tables():
             columns = _columns(table)
@@ -165,9 +220,11 @@ def downgrade() -> None:
         "inactivity_action_logs",
         "inactivity_policy_repositories",
         "inactivity_policies",
+        "issues",
     ):
         if table in tables:
             op.drop_table(table)
+
     repository_indexes = _indexes("repositories")
     if "ix_repositories_last_activity" in repository_indexes:
         op.drop_index("ix_repositories_last_activity", table_name="repositories")
@@ -180,3 +237,17 @@ def downgrade() -> None:
     ):
         if name in repository_columns:
             op.drop_column("repositories", name)
+
+    user_columns = _columns("users")
+    for name in (
+        "avatar_updated_at",
+        "avatar_blob",
+        "avatar_mime",
+        "preferences",
+        "locale",
+        "timezone",
+        "bio",
+        "job_title",
+    ):
+        if name in user_columns:
+            op.drop_column("users", name)
