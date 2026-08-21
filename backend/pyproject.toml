@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argws-git-monitor-api"
-version = "0.4.0"
+version = "0.4.1"
 description = "API e workers do ARGWS Git Monitor"
 readme = "README.md"
 requires-python = ">=3.13,<3.15"
 dependencies = [
   "alembic>=1.16,<2",
   "asyncpg>=0.30,<1",
-  "celery>=5.5,<6",
+  "celery>=5.6,<6",
   "cryptography>=45,<47",
   "email-validator>=2.2,<3",
   "fastapi>=0.116,<1",
