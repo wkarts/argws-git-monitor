@@ -30,6 +30,12 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     worker_hijack_root_logger=False,
     broker_connection_retry_on_startup=True,
+    # RabbitMQ 4.3+ rejeita filas simultaneamente transitórias e não exclusivas.
+    # Celery/Kombu 5.6 expõe estas opções justamente para que as filas temporárias
+    # de pidbox/remote-control sejam exclusivas, evitando depender do recurso
+    # deprecated `transient_nonexcl_queues` do broker.
+    control_queue_exclusive=True,
+    event_queue_exclusive=True,
     result_expires=3600,
     beat_schedule={
         "sync-all-github-connections": {
