@@ -2,7 +2,7 @@ name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
-  APP_VERSION: ${APP_VERSION:-0.2.3}
+  APP_VERSION: ${APP_VERSION:-0.3.0}
   APP_ENV: ${APP_ENV:-production}
   APP_DEBUG: ${APP_DEBUG:-false}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -162,7 +162,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_APP_VERSION: ${APP_VERSION:-0.2.3}
+        VITE_APP_VERSION: ${APP_VERSION:-0.3.0}
         VITE_API_BASE_URL: /api/v1
     restart: unless-stopped
     ports:

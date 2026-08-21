@@ -1,6 +1,7 @@
 export type HealthStatus = 'healthy' | 'running' | 'attention' | 'failing' | 'unknown'
 export type ConnectionStatus = 'active' | 'error' | 'revoked' | 'demo'
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'error'
+export type SyncJobStatus = 'queued' | 'running' | 'success' | 'failed' | 'cancelled'
 
 export interface User {
   id: string
@@ -9,6 +10,8 @@ export interface User {
   is_active: boolean
   is_superuser: boolean
   must_change_password: boolean
+  totp_enabled: boolean
+  totp_confirmed_at: string | null
   last_login_at: string | null
   created_at: string
 }
@@ -28,6 +31,28 @@ export interface AuthSession {
   accessExpiresAt: string
   refreshExpiresAt: string
   user: User
+}
+
+export interface SessionItem {
+  id: string
+  expires_at: string
+  revoked_at: string | null
+  user_agent: string | null
+  ip_address: string | null
+  created_at: string
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean
+  confirmed_at: string | null
+  recovery_codes_remaining: number
+}
+
+export interface TwoFactorSetup {
+  secret: string
+  otpauth_uri: string
+  qr_data_uri: string
+  recovery_codes: string[]
 }
 
 export interface WorkflowRun {
@@ -184,6 +209,8 @@ export interface GitHubConnection {
   rate_limit_reset_at: string | null
   created_at: string
   repository_count: number
+  available_repository_count: number
+  oauth_scopes: string[]
 }
 
 export interface RemoteRepository {
@@ -198,6 +225,16 @@ export interface RemoteRepository {
   default_branch: string
   language: string | null
   selected: boolean
+  permissions: Record<string, boolean>
+}
+
+export interface RepositoryImportResponse {
+  message: string
+  imported_count: number
+  already_monitored_count: number
+  queued_count: number
+  repository_ids: string[]
+  job_ids: string[]
 }
 
 export interface PaginatedResponse<T> {
@@ -215,6 +252,7 @@ export interface MessageResponse {
 export interface SyncResponse {
   message: string
   task_id?: string | null
+  job_id?: string | null
 }
 
 export interface WorkflowActionResponse {
@@ -256,4 +294,59 @@ export interface IssueSummary {
   health_score: number
   health_status: HealthStatus
   last_synced_at: string | null
+}
+
+export interface SyncJob {
+  id: string
+  user_id: string
+  connection_id: string | null
+  repository_id: string | null
+  celery_task_id: string | null
+  kind: string
+  label: string
+  status: SyncJobStatus
+  progress_current: number
+  progress_total: number
+  message: string | null
+  error: string | null
+  result: Record<string, unknown>
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface QueueOverview {
+  queued: number
+  running: number
+  succeeded: number
+  failed: number
+  total: number
+}
+
+export interface AdminUser {
+  id: string
+  name: string
+  email: string
+  is_active: boolean
+  is_superuser: boolean
+  must_change_password: boolean
+  totp_enabled: boolean
+  last_login_at: string | null
+  created_at: string
+  github_connection_count: number
+  repository_count: number
+  active_session_count: number
+}
+
+export interface AdminOverview {
+  total_users: number
+  active_users: number
+  administrators: number
+  two_factor_enabled: number
+  active_sessions: number
+}
+
+export interface AdminPasswordResetResponse {
+  message: string
+  temporary_password: string
 }

@@ -1,29 +1,83 @@
 # ARGWS Git Monitor
 
-Central operacional **mobile-first** para monitorar repositórios públicos e privados do GitHub em uma única PWA. O projeto inclui API, frontend, workers, PostgreSQL, Redis, RabbitMQ, migrations, autenticação, Docker, CI/CD, backup, GitHub Release e imagens no GHCR.
+Central operacional **mobile-first** para monitorar e administrar repositórios públicos e privados do GitHub em uma única PWA. A versão 0.3.0 evolui o projeto de um painel de consulta para uma ferramenta operacional com catálogo imediato, fila visível, gestão de repositórios, 2FA e administração de usuários.
 
-## Recursos entregues
+## Recursos principais
 
-- Dashboard operacional no padrão visual aprovado.
-- Repositórios, Pull Requests, Actions, Releases, Issues, Alertas e Configurações.
-- Experiência mobile-first e PWA instalável.
-- Integração com repositórios públicos e privados do GitHub.
-- Sincronização automática, manual e por webhook.
-- Reexecução e cancelamento de workflows conforme as permissões do token.
-- Token GitHub criptografado no PostgreSQL.
-- JWT, refresh rotativo, Argon2 e troca obrigatória da senha inicial.
-- Logs estruturados, health checks, métricas, backup e restauração.
+- Dashboard consolidado de saúde, Actions, Pull Requests, releases, issues e alertas.
+- Catálogo de repositórios públicos e privados com descoberta imediata após conexão/sincronização.
+- Monitoramento selecionável por projeto ou automático para todos os repositórios acessíveis.
+- Fila operacional persistente e visível com estados `queued`, `running`, `success`, `failed` e `cancelled`.
+- Sincronização manual, automática e por webhook.
+- Criação de repositório diretamente pelo Git Monitor.
+- Alteração de visibilidade público/privado pelo backend.
+- Remoção somente do monitor sem tocar no GitHub.
+- Exclusão definitiva no GitHub mediante confirmação exata do `owner/repo`.
+- Reexecução e cancelamento de GitHub Actions conforme as permissões do token.
+- Autenticação em duas etapas TOTP com QR Code e códigos de recuperação.
+- Gestão de sessões e revogação de acessos.
+- Painel administrativo responsivo de usuários, administradores, sessões e 2FA.
+- Tema claro de alto contraste como padrão inicial, mantendo tema escuro e automático.
+- PWA instalável e responsiva para desktop, tablet e celular.
+- Token GitHub criptografado no PostgreSQL e nunca retornado ao navegador.
+- JWT, refresh rotativo, Argon2, logs estruturados, health checks e métricas.
 - Docker Compose com deploy separado para CloudPanel, Dockge, Portainer, GHCR e build local.
 
-## Interface visual
+## Fluxo GitHub
 
-A interface aprovada na versão 0.2.0 permanece como contrato visual da série 0.2.x.
+A partir da versão 0.3.0, importar/monitorar um repositório não depende mais da conclusão de uma fila invisível:
 
-![Dashboard desktop](docs/previews/argws-git-monitor-dashboard-desktop-v0.2.0.png)
+```text
+GitHub token
+   │
+   ▼
+Descoberta imediata do catálogo
+   │
+   ├── repositório já aparece em Repositórios
+   │
+   └── sincronização detalhada vai para a Fila
+             │
+             ├── commits
+             ├── branches
+             ├── Actions
+             ├── Pull Requests
+             ├── releases
+             └── saúde operacional
+```
 
-![Dashboard mobile](docs/previews/argws-git-monitor-dashboard-mobile-v0.2.0.png)
+A fila pode ser acompanhada em **Fila** no menu principal.
 
-Os critérios visuais estão em `docs/CONTRATO_VISUAL.md`.
+## Permissões GitHub
+
+Para monitorar, permissões de leitura são suficientes. Operações administrativas dependem das permissões efetivamente concedidas ao token.
+
+| Recurso | Monitoramento | Operação |
+|---|---:|---:|
+| Metadata | leitura | leitura |
+| Contents | leitura | leitura |
+| Actions | leitura | escrita para reexecutar/cancelar |
+| Pull requests | leitura | leitura |
+| Issues | leitura | leitura |
+| Webhooks | nenhuma | escrita |
+| Administration | nenhuma | escrita para criar/configurar/alterar repositórios |
+
+Para exclusão definitiva, o token também precisa permitir exclusão de repositório conforme o tipo de credencial e as regras da conta/organização.
+
+## Segurança local
+
+A plataforma oferece:
+
+- senha Argon2;
+- JWT de curta duração;
+- refresh token rotativo e revogável;
+- sessões listáveis e revogáveis;
+- TOTP/2FA;
+- códigos de recuperação armazenados somente como hash;
+- token GitHub criptografado com Fernet;
+- trilha de auditoria;
+- confirmação reforçada para exclusão de repositório.
+
+As credenciais administrativas iniciais são geradas durante a instalação e a senha deve ser substituída no primeiro acesso.
 
 ## Deploys separados
 
@@ -68,7 +122,7 @@ deploy/
 
 ## Armazenamento relativo à stack
 
-A partir da versão **0.2.3**, os dados persistentes não usam volumes nomeados nem diretórios absolutos do Linux. Todos os arquivos Compose utilizam fontes iniciadas por `./`:
+Dados persistentes usam **bind mounts relativos ao diretório físico do Compose**:
 
 ```yaml
 postgres:
@@ -84,7 +138,7 @@ rabbitmq:
     - ./data-rabbitmq:/var/lib/rabbitmq
 ```
 
-A estrutura física de cada stack fica assim:
+Estrutura física:
 
 ```text
 pasta-da-stack/
@@ -95,44 +149,20 @@ pasta-da-stack/
 └── data-rabbitmq/
 ```
 
-Consequências práticas:
+Os geradores e scripts de deploy criam essas pastas automaticamente. `docker compose down` não remove os diretórios `data-*`.
 
-- os dados acompanham o diretório da stack;
-- o Dockge armazena os dados dentro do diretório físico daquela stack;
-- o Portainer resolve os caminhos dentro do diretório de trabalho da stack;
-- o CloudPanel continua apenas como reverse proxy e não recebe os dados;
-- `docker compose down` não remove as pastas `data-*`;
-- backup e auditoria física ficam mais simples.
+### Migração de instalações anteriores
 
-As pastas são criadas automaticamente pelos geradores e scripts de deploy.
-
-## Migração de volumes nomeados anteriores
-
-Instalações até a versão 0.2.2 devem migrar antes do primeiro deploy 0.2.3:
+Para instalações antigas que ainda usam volumes Docker nomeados:
 
 ```bash
 docker compose down
 bash deploy/migrate-named-volumes.sh --stack-dir /caminho/da/stack
 ```
 
-O migrador:
+O migrador copia os dados para `./data-*`, recusa sobrescrever diretórios não vazios e preserva os volumes antigos para rollback.
 
-- identifica `${COMPOSE_PROJECT_NAME}_postgres_data`;
-- identifica `${COMPOSE_PROJECT_NAME}_redis_data`;
-- identifica `${COMPOSE_PROJECT_NAME}_rabbitmq_data`;
-- copia os arquivos para `./data-postgres`, `./data-redis` e `./data-rabbitmq`;
-- recusa sobrescrever diretórios não vazios;
-- preserva os volumes antigos para rollback.
-
-Na instalação pela raiz também existe o atalho:
-
-```bash
-make migrate-storage
-```
-
-## Instalação direta
-
-Os instaladores da raiz continuam disponíveis e criam as pastas relativas automaticamente.
+## Instalação
 
 ### Windows
 
@@ -140,7 +170,7 @@ Os instaladores da raiz continuam disponíveis e criam as pastas relativas autom
 2. Abra o Docker Desktop.
 3. Execute `INSTALAR_WINDOWS.bat`.
 4. Acesse `http://localhost:8080`.
-5. Consulte `CREDENCIAIS_INICIAIS.txt`.
+5. Troque a senha administrativa no primeiro acesso.
 
 ### Linux
 
@@ -149,9 +179,7 @@ chmod +x INSTALAR_LINUX.sh
 ./INSTALAR_LINUX.sh
 ```
 
-## Docker Compose separado
-
-### Imagens GHCR
+### Docker por GHCR
 
 ```bash
 cd deploy/docker
@@ -159,7 +187,7 @@ bash generate-env.sh
 bash deploy-ghcr.sh
 ```
 
-### Build local
+### Docker com build local
 
 ```bash
 cd deploy/docker
@@ -167,7 +195,7 @@ bash generate-env.sh
 bash deploy-local.sh
 ```
 
-## Dockge
+### Dockge
 
 ```bash
 cd deploy/dockge
@@ -175,9 +203,7 @@ bash generate-env.sh --url https://git.seu-dominio.com.br --bind 127.0.0.1
 bash deploy.sh
 ```
 
-Copie o conteúdo completo dessa pasta para o diretório de armazenamento de stacks do Dockge. Os diretórios `data-*` serão criados no mesmo local.
-
-## CloudPanel junto com Dockge
+### CloudPanel + Dockge
 
 ```bash
 cd deploy/cloudpanel/dockge
@@ -185,24 +211,13 @@ bash generate-env.sh --url https://git.seu-dominio.com.br
 bash deploy.sh
 ```
 
-Depois, aplique:
+Use o reverse proxy disponível em:
 
 ```text
 deploy/cloudpanel/nginx/argws-git-monitor.conf
 ```
 
-A Web fica em `127.0.0.1:8080`, enquanto domínio e TLS são administrados pelo CloudPanel.
-
-## Portainer
-
-Use:
-
-```text
-deploy/portainer/compose.yaml
-deploy/portainer/stack.env.example
-```
-
-Para gerar as variáveis:
+### Portainer
 
 ```bash
 cd deploy/portainer
@@ -214,65 +229,33 @@ Importe `stack.env` em **Environment variables**.
 ## Imagens Docker
 
 ```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.3
-ghcr.io/wkarts/argws-git-monitor-web:0.2.3
+ghcr.io/wkarts/argws-git-monitor-api:0.3.0
+ghcr.io/wkarts/argws-git-monitor-web:0.3.0
 ```
 
-Tags publicadas:
+Também são publicadas:
 
 ```text
 latest
 sha-<commit>
-0.2.3
-0.2
+0.3.0
+0.3
 ```
 
-Pull versionado:
-
-```bash
-docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.3
-docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.3
-```
-
-Pacotes privados:
-
-```bash
-echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin
-```
-
-## Primeiro acesso e GitHub
-
-1. Entre com as credenciais geradas.
-2. Troque a senha administrativa.
-3. Abra **Configurações > Nova conexão**.
-4. Cadastre um token fine-grained.
-5. Importe os repositórios autorizados.
-
-Permissões recomendadas:
-
-| Permissão | Monitoramento | Operação |
-|---|---:|---:|
-| Metadata | leitura | leitura |
-| Contents | leitura | leitura |
-| Actions | leitura | escrita |
-| Pull requests | leitura | leitura |
-| Issues | leitura | leitura |
-| Webhooks | nenhuma | escrita |
-
-## Serviços Docker
+## Serviços
 
 | Serviço | Papel |
 |---|---|
-| `web` | Vue 3 PWA e proxy Nginx da API |
-| `api` | FastAPI e OpenAPI |
+| `web` | Vue 3 PWA e Nginx |
+| `api` | FastAPI/OpenAPI |
 | `worker` | Celery |
 | `beat` | Agendador Celery |
 | `migrate` | Alembic e bootstrap |
 | `postgres` | Persistência principal |
 | `redis` | Cache e resultados |
-| `rabbitmq` | Broker das filas |
+| `rabbitmq` | Broker da fila |
 
-Portas:
+Portas padrão:
 
 - aplicação: `8080`;
 - RabbitMQ Management: `127.0.0.1:15672`;
@@ -290,17 +273,6 @@ Portas:
 ./scripts/update.sh
 ```
 
-Atalhos:
-
-```bash
-make validate
-make validate-deploys
-make deploy-ghcr
-make deploy-local
-make deploy-dockge
-make migrate-storage
-```
-
 ## CI/CD
 
 A versão deve coincidir em:
@@ -311,17 +283,9 @@ backend/pyproject.toml
 frontend/package.json
 ```
 
-O pipeline:
+O pipeline valida backend, frontend, migrations, deploys e Composes; constrói API/Web para `linux/amd64` e `linux/arm64`; publica no GHCR; inspeciona os manifests; e cria a GitHub Release.
 
-1. valida backend, frontend, pacote e deploys;
-2. exige bind mounts relativos em todos os Compose de produção;
-3. rejeita volumes nomeados para PostgreSQL, Redis e RabbitMQ;
-4. constrói API e Web para `linux/amd64` e `linux/arm64`;
-5. publica e inspeciona os manifests no GHCR;
-6. cria a tag e a GitHub Release;
-7. publica o pacote completo e o pacote separado de deploys.
-
-Versão atual: **0.2.3**. Git tag: **v0.2.3**. Tag Docker: **0.2.3**.
+Versão atual: **0.3.0**. Git tag esperada após merge: **v0.3.0**. Tag Docker: **0.3.0**.
 
 ## Documentação
 
@@ -342,8 +306,6 @@ Versão atual: **0.2.3**. Git tag: **v0.2.3**. Tag Docker: **0.2.3**.
 ```bash
 docker compose -f compose.yaml -f compose.dev.yaml up -d --build
 ```
-
-O volume `frontend_node_modules` do ambiente de desenvolvimento permanece efêmero e não contém dados de produção. A regra de armazenamento relativo é aplicada aos dados persistentes de PostgreSQL, Redis e RabbitMQ.
 
 ## Licença
 

@@ -15,19 +15,23 @@ from app.models.github import (
     Repository,
     WorkflowRun,
 )
-from app.schemas.common import PaginatedResponse
+from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.github import SyncAcceptedResponse
 from app.schemas.repository import (
     PullRequestRead,
     ReleaseRead,
+    RepositoryDeleteRequest,
     RepositoryDetail,
     RepositoryRead,
+    RepositoryRemoteUpdate,
     RepositoryUpdate,
     WorkflowActionResponse,
     WorkflowRunRead,
 )
 from app.services.github_client import GitHubAPIError
+from app.services.github_mapping import apply_repository_base
 from app.services.github_sync import get_repository_client
+from app.services.job_queue import create_job
 from app.tasks.jobs import sync_repository_task
 
 router = APIRouter(prefix="/repositories", tags=["Repositórios"])
@@ -146,15 +150,110 @@ async def update_repository(
     return RepositoryRead.model_validate(repository)
 
 
+@router.patch("/{repository_id}/github", response_model=RepositoryRead)
+async def update_remote_repository(
+    repository_id: uuid.UUID,
+    payload: RepositoryRemoteUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> RepositoryRead:
+    repository = await _owned_repository(db, repository_id, current_user.id)
+    try:
+        _, client = await get_repository_client(repository.id, user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        remote = await client.update_repository(
+            repository.full_name,
+            private=payload.private,
+            archived=payload.archived,
+            description=payload.description,
+        )
+    except GitHubAPIError as exc:
+        code = 403 if exc.status_code in {401, 403} else 400
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    finally:
+        await client.close()
+
+    apply_repository_base(repository, remote)
+    repository.sync_error = None
+    await db.commit()
+    await db.refresh(repository)
+    return RepositoryRead.model_validate(repository)
+
+
+@router.delete("/{repository_id}/monitoring", response_model=MessageResponse)
+async def remove_from_monitor(
+    repository_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> MessageResponse:
+    repository = await _owned_repository(db, repository_id, current_user.id)
+    full_name = repository.full_name
+    await db.delete(repository)
+    await db.commit()
+    return MessageResponse(
+        message=f"{full_name} removido somente do monitor. O repositório no GitHub não foi alterado."
+    )
+
+
+@router.post("/{repository_id}/delete-github", response_model=MessageResponse)
+async def delete_from_github(
+    repository_id: uuid.UUID,
+    payload: RepositoryDeleteRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> MessageResponse:
+    repository = await _owned_repository(db, repository_id, current_user.id)
+    if payload.confirmation.strip() != repository.full_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Para excluir definitivamente, digite exatamente {repository.full_name}.",
+        )
+    try:
+        _, client = await get_repository_client(repository.id, user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        await client.delete_repository(repository.full_name)
+    except GitHubAPIError as exc:
+        code = 403 if exc.status_code in {401, 403} else 400
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    finally:
+        await client.close()
+
+    full_name = repository.full_name
+    await db.delete(repository)
+    await db.commit()
+    return MessageResponse(message=f"{full_name} foi excluído definitivamente do GitHub e do monitor.")
+
+
 @router.post("/{repository_id}/sync", response_model=SyncAcceptedResponse)
 async def sync_repository_now(
     repository_id: uuid.UUID,
     current_user: CurrentUser,
     db: DbSession,
 ) -> SyncAcceptedResponse:
-    await _owned_repository(db, repository_id, current_user.id)
-    task = sync_repository_task.delay(str(repository_id))
-    return SyncAcceptedResponse(message="Sincronização adicionada à fila.", task_id=task.id)
+    repository = await _owned_repository(db, repository_id, current_user.id)
+    job = await create_job(
+        db,
+        user_id=current_user.id,
+        connection_id=repository.connection_id,
+        repository_id=repository.id,
+        kind="repository.sync.manual",
+        label=f"Sincronizar · {repository.full_name}",
+    )
+    await db.commit()
+    task = sync_repository_task.delay(str(repository_id), str(job.id))
+    job.celery_task_id = task.id
+    await db.commit()
+    return SyncAcceptedResponse(
+        message="Sincronização adicionada à fila visível.",
+        task_id=task.id,
+        job_id=job.id,
+    )
 
 
 async def _run_workflow_action(

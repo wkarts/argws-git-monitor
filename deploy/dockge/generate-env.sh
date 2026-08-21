@@ -10,25 +10,11 @@ FORCE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --port)
-      shift
-      PORT="${1:?Informe a porta após --port}"
-      ;;
-    --bind)
-      shift
-      BIND_ADDRESS="${1:?Informe o endereço após --bind}"
-      ;;
-    --url)
-      shift
-      PUBLIC_URL="${1:?Informe a URL após --url}"
-      ;;
-    --force)
-      FORCE=true
-      ;;
-    *)
-      echo "Uso: bash generate-env.sh [--port 8080] [--bind 0.0.0.0] [--url URL] [--force]" >&2
-      exit 2
-      ;;
+    --port) shift; PORT="${1:?Informe a porta após --port}" ;;
+    --bind) shift; BIND_ADDRESS="${1:?Informe o endereço após --bind}" ;;
+    --url) shift; PUBLIC_URL="${1:?Informe a URL após --url}" ;;
+    --force) FORCE=true ;;
+    *) echo "Uso: bash generate-env.sh [--port 8080] [--bind 0.0.0.0] [--url URL] [--force]" >&2; exit 2 ;;
   esac
   shift
 done
@@ -42,17 +28,10 @@ if [[ -f "$ENV_PATH" && "$FORCE" != true ]]; then
   exit 0
 fi
 
-random_urlsafe() {
-  head -c "$1" /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n\r'
-}
+random_urlsafe() { head -c "$1" /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n\r'; }
+fernet_key() { head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '\n\r'; }
 
-fernet_key() {
-  head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '\n\r'
-}
-
-if [[ -z "$PUBLIC_URL" ]]; then
-  PUBLIC_URL="http://localhost:${PORT}"
-fi
+if [[ -z "$PUBLIC_URL" ]]; then PUBLIC_URL="http://localhost:${PORT}"; fi
 PUBLIC_URL="${PUBLIC_URL%/}"
 
 ADMIN_PASSWORD="$(random_urlsafe 18)"
@@ -65,7 +44,7 @@ WEBHOOK_SECRET="$(random_urlsafe 48)"
 cat > "$ENV_PATH" <<EOF
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.3
+APP_VERSION=0.3.0
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -96,13 +75,12 @@ NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
 CELERY_CONCURRENCY=2
 CELERY_MAX_TASKS_PER_CHILD=100
-IMAGE_TAG=0.2.3
+IMAGE_TAG=0.3.0
 API_IMAGE=ghcr.io/wkarts/argws-git-monitor-api
 WEB_IMAGE=ghcr.io/wkarts/argws-git-monitor-web
 EOF
 
 chmod 600 "$ENV_PATH" 2>/dev/null || true
-
 cat <<EOF
 Arquivo criado: $ENV_PATH
 Aplicação: $PUBLIC_URL

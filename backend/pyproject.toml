@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argws-git-monitor-api"
-version = "0.2.3"
+version = "0.3.0"
 description = "API e workers do ARGWS Git Monitor"
 readme = "README.md"
 requires-python = ">=3.13,<3.15"
@@ -23,6 +23,7 @@ dependencies = [
   "pydantic-settings>=2.10,<3",
   "PyJWT[crypto]>=2.10,<3",
   "python-multipart>=0.0.20,<1",
+  "qrcode[pil]>=8.2,<9",
   "redis>=6,<7",
   "sqlalchemy[asyncio]>=2.0.41,<3",
   "uvicorn[standard]>=0.35,<1"

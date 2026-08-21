@@ -9,30 +9,16 @@ FORCE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --port)
-      shift
-      PORT="${1:?Informe a porta após --port}"
-      ;;
-    --url)
-      shift
-      PUBLIC_URL="${1:?Informe a URL HTTPS após --url}"
-      ;;
-    --force)
-      FORCE=true
-      ;;
-    *)
-      echo "Uso: bash generate-env.sh --url https://git.seu-dominio.com.br [--port 8080] [--force]" >&2
-      exit 2
-      ;;
+    --port) shift; PORT="${1:?Informe a porta após --port}" ;;
+    --url) shift; PUBLIC_URL="${1:?Informe a URL HTTPS após --url}" ;;
+    --force) FORCE=true ;;
+    *) echo "Uso: bash generate-env.sh --url https://git.seu-dominio.com.br [--port 8080] [--force]" >&2; exit 2 ;;
   esac
   shift
 done
 
 [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "Porta inválida: $PORT" >&2; exit 2; }
-[[ "$PUBLIC_URL" == https://* ]] || {
-  echo "CloudPanel exige uma URL HTTPS. Use --url https://git.seu-dominio.com.br" >&2
-  exit 2
-}
+[[ "$PUBLIC_URL" == https://* ]] || { echo "CloudPanel exige uma URL HTTPS. Use --url https://git.seu-dominio.com.br" >&2; exit 2; }
 PUBLIC_URL="${PUBLIC_URL%/}"
 mkdir -p "$ROOT/data-postgres" "$ROOT/data-redis" "$ROOT/data-rabbitmq"
 
@@ -42,13 +28,8 @@ if [[ -f "$ENV_PATH" && "$FORCE" != true ]]; then
   exit 0
 fi
 
-random_urlsafe() {
-  head -c "$1" /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n\r'
-}
-
-fernet_key() {
-  head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '\n\r'
-}
+random_urlsafe() { head -c "$1" /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n\r'; }
+fernet_key() { head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '\n\r'; }
 
 ADMIN_PASSWORD="$(random_urlsafe 18)"
 POSTGRES_PASSWORD="$(random_urlsafe 24)"
@@ -60,7 +41,7 @@ WEBHOOK_SECRET="$(random_urlsafe 48)"
 cat > "$ENV_PATH" <<EOF
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.3
+APP_VERSION=0.3.0
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -91,13 +72,12 @@ NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
 CELERY_CONCURRENCY=2
 CELERY_MAX_TASKS_PER_CHILD=100
-IMAGE_TAG=0.2.3
+IMAGE_TAG=0.3.0
 API_IMAGE=ghcr.io/wkarts/argws-git-monitor-api
 WEB_IMAGE=ghcr.io/wkarts/argws-git-monitor-web
 EOF
 
 chmod 600 "$ENV_PATH" 2>/dev/null || true
-
 cat <<EOF
 Arquivo criado: $ENV_PATH
 Domínio público: $PUBLIC_URL
