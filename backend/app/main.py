@@ -14,6 +14,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_
 from app.api.routes import (
     admin,
     auth,
+    compliance_local,
     dashboard,
     github,
     github_diagnostics,
@@ -119,6 +120,7 @@ app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
 app.include_router(github.router, prefix=settings.api_v1_prefix)
 app.include_router(github_diagnostics.router, prefix=settings.api_v1_prefix)
 app.include_router(github_tools.router, prefix=settings.api_v1_prefix)
+app.include_router(compliance_local.router, prefix=settings.api_v1_prefix)
 app.include_router(inactivity.router, prefix=settings.api_v1_prefix)
 app.include_router(jobs.router, prefix=settings.api_v1_prefix)
 app.include_router(repositories.router, prefix=settings.api_v1_prefix)
