@@ -115,6 +115,24 @@ class GitHubClient:
         response = await self.request("GET", path, params=params)
         return response.json()
 
+    @staticmethod
+    def _items_from_payload(payload: Any) -> list[Any]:
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            for key in (
+                "workflow_runs",
+                "workflows",
+                "items",
+                "artifacts",
+                "repositories",
+                "packages",
+            ):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    return value
+        return []
+
     async def paginate(
         self,
         path: str,
@@ -128,11 +146,7 @@ class GitHubClient:
         while len(collected) < limit:
             page_params = {**base_params, "per_page": min(100, limit - len(collected)), "page": page}
             response = await self.request("GET", path, params=page_params)
-            payload = response.json()
-            if isinstance(payload, dict):
-                items = payload.get("workflow_runs") or payload.get("items") or []
-            else:
-                items = payload
+            items = self._items_from_payload(response.json())
             if not isinstance(items, list):
                 raise GitHubAPIError(f"Resposta inesperada do GitHub em {path}.")
             collected.extend(item for item in items if isinstance(item, dict))
@@ -251,11 +265,19 @@ class GitHubClient:
             "branches", f"/repos/{full_name}/branches", limit=limit, empty_statuses={403, 404, 409}
         )
 
+    async def list_workflows(self, full_name: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        return await self.optional_paginate(
+            "actions_workflows",
+            f"/repos/{full_name}/actions/workflows",
+            limit=limit,
+            empty_statuses={403, 404},
+        )
+
     async def list_workflow_runs(
         self, full_name: str, *, limit: int = 30
     ) -> list[dict[str, Any]]:
         return await self.optional_paginate(
-            "actions", f"/repos/{full_name}/actions/runs", limit=limit, empty_statuses={403, 404}
+            "actions_runs", f"/repos/{full_name}/actions/runs", limit=limit, empty_statuses={403, 404}
         )
 
     async def list_pull_requests(
@@ -269,10 +291,42 @@ class GitHubClient:
             empty_statuses={403, 404},
         )
 
+    async def list_issues(self, full_name: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        items = await self.optional_paginate(
+            "issues",
+            f"/repos/{full_name}/issues",
+            params={"state": "open", "sort": "updated", "direction": "desc"},
+            limit=limit,
+            empty_statuses={403, 404},
+        )
+        return [item for item in items if not item.get("pull_request")]
+
     async def list_releases(self, full_name: str, *, limit: int = 20) -> list[dict[str, Any]]:
         return await self.optional_paginate(
             "releases", f"/repos/{full_name}/releases", limit=limit, empty_statuses={403, 404}
         )
+
+    async def create_issue(self, full_name: str, *, title: str, body: str | None = None) -> dict[str, Any]:
+        response = await self.request(
+            "POST",
+            f"/repos/{full_name}/issues",
+            json={"title": title, "body": body or ""},
+        )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise GitHubAPIError("Resposta inválida ao criar issue.")
+        return payload
+
+    async def update_issue_state(self, full_name: str, issue_number: int, state: str) -> dict[str, Any]:
+        response = await self.request(
+            "PATCH",
+            f"/repos/{full_name}/issues/{issue_number}",
+            json={"state": state},
+        )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise GitHubAPIError("Resposta inválida ao atualizar issue.")
+        return payload
 
     async def rerun_failed_workflow(self, full_name: str, run_id: int) -> None:
         await self.request("POST", f"/repos/{full_name}/actions/runs/{run_id}/rerun-failed-jobs")
