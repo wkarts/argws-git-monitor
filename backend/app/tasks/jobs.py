@@ -10,13 +10,14 @@ from app.core.config import get_settings
 from app.core.database import dispose_engine, session_scope
 from app.models.activity import Notification, SyncJob, SyncJobStatus
 from app.models.github import ConnectionStatus, GitHubConnection
-from app.services.github_sync import sync_connection, sync_repository
+from app.services.github_sync import sync_repository
 from app.services.job_queue import (
     create_job,
     mark_job_failed,
     mark_job_running,
     mark_job_success,
 )
+from app.services.sync_orchestrator import sync_connection_with_progress
 from app.tasks.celery_app import celery_app
 
 
@@ -59,9 +60,24 @@ def sync_connection_task(
         run_async(mark_job_running(job_id, message="Sincronizando catálogo e dados do GitHub."))
     try:
         selected = set(selected_ids) if selected_ids else None
-        result = run_async(sync_connection(connection_id, selected_github_ids=selected))
+        result = run_async(
+            sync_connection_with_progress(
+                connection_id,
+                selected_github_ids=selected,
+                job_id=job_id,
+            )
+        )
         if job_id:
-            run_async(mark_job_success(job_id, result=result, message="Sincronização concluída."))
+            run_async(
+                mark_job_success(
+                    job_id,
+                    result=result,
+                    message=(
+                        f"Sincronização concluída: {result['synced']} sucesso, "
+                        f"{result['errors']} erro(s)."
+                    ),
+                )
+            )
         return result
     except Exception as exc:
         _retry_or_fail(self, exc, job_id, max_countdown=180)
