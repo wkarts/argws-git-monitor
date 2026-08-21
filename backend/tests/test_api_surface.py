@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.config import get_settings
 from app.main import api_root, app
 
 
@@ -47,10 +48,10 @@ def test_openapi_exposes_control_center_operations() -> None:
 
 
 @pytest.mark.asyncio
-async def test_api_root_reports_current_version() -> None:
+async def test_api_root_reports_its_internal_version() -> None:
     payload = await api_root()
 
     assert payload["name"] == "ARGWS Git Monitor"
-    assert payload["version"] == "0.3.1"
+    assert payload["version"] == get_settings().app_version
     assert payload["status"] == "operational"
     assert payload["docs"] == "/api/v1/docs"
