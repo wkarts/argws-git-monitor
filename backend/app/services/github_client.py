@@ -26,6 +26,8 @@ class GitHubClient:
         self.timeout = settings.github_request_timeout_seconds
         self.rate_limit_remaining: int | None = None
         self.rate_limit_reset_at: datetime | None = None
+        self.oauth_scopes: list[str] = []
+        self.accepted_permissions: str | None = None
         self._client = httpx.AsyncClient(
             base_url=self.api_url,
             timeout=httpx.Timeout(self.timeout),
@@ -34,7 +36,7 @@ class GitHubClient:
                 "Accept": "application/vnd.github+json",
                 "Authorization": f"Bearer {token}",
                 "X-GitHub-Api-Version": settings.github_api_version,
-                "User-Agent": "ARGWS-Git-Monitor/0.2.0",
+                "User-Agent": f"ARGWS-Git-Monitor/{settings.app_version}",
             },
         )
 
@@ -47,13 +49,19 @@ class GitHubClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    def _capture_rate_limit(self, response: httpx.Response) -> None:
+    def _capture_response_metadata(self, response: httpx.Response) -> None:
         remaining = response.headers.get("x-ratelimit-remaining")
         reset = response.headers.get("x-ratelimit-reset")
+        scopes = response.headers.get("x-oauth-scopes")
+        accepted_permissions = response.headers.get("x-accepted-github-permissions")
         if remaining and remaining.isdigit():
             self.rate_limit_remaining = int(remaining)
         if reset and reset.isdigit():
             self.rate_limit_reset_at = datetime.fromtimestamp(int(reset), tz=UTC)
+        if scopes is not None:
+            self.oauth_scopes = [item.strip() for item in scopes.split(",") if item.strip()]
+        if accepted_permissions:
+            self.accepted_permissions = accepted_permissions
 
     async def request(
         self,
@@ -78,7 +86,7 @@ class GitHubClient:
         if response is None:
             raise GitHubAPIError(f"Falha de comunicação com o GitHub: {last_error}") from last_error
 
-        self._capture_rate_limit(response)
+        self._capture_response_metadata(response)
         if response.status_code == 403 and self.rate_limit_remaining == 0:
             reset_text = (
                 self.rate_limit_reset_at.isoformat() if self.rate_limit_reset_at else "desconhecido"
@@ -150,11 +158,67 @@ class GitHubClient:
             limit=limit,
         )
 
+    async def create_repository(
+        self,
+        *,
+        name: str,
+        description: str | None = None,
+        private: bool = True,
+        auto_init: bool = True,
+    ) -> dict[str, Any]:
+        response = await self.request(
+            "POST",
+            "/user/repos",
+            json={
+                "name": name,
+                "description": description or "",
+                "private": private,
+                "auto_init": auto_init,
+                "has_issues": True,
+                "has_projects": True,
+                "has_wiki": False,
+                "delete_branch_on_merge": True,
+            },
+        )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise GitHubAPIError("O GitHub não retornou o repositório criado.")
+        return payload
+
     async def get_repository(self, full_name: str) -> dict[str, Any]:
         payload = await self.get_json(f"/repos/{full_name}")
         if not isinstance(payload, dict):
             raise GitHubAPIError(f"Resposta inválida para o repositório {full_name}.")
         return payload
+
+    async def update_repository(
+        self,
+        full_name: str,
+        *,
+        private: bool | None = None,
+        archived: bool | None = None,
+        description: str | None = None,
+        default_branch: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if private is not None:
+            payload["private"] = private
+        if archived is not None:
+            payload["archived"] = archived
+        if description is not None:
+            payload["description"] = description
+        if default_branch is not None:
+            payload["default_branch"] = default_branch
+        if not payload:
+            return await self.get_repository(full_name)
+        response = await self.request("PATCH", f"/repos/{full_name}", json=payload)
+        data = response.json()
+        if not isinstance(data, dict):
+            raise GitHubAPIError(f"Resposta inválida ao atualizar {full_name}.")
+        return data
+
+    async def delete_repository(self, full_name: str) -> None:
+        await self.request("DELETE", f"/repos/{full_name}")
 
     async def list_commits(self, full_name: str, *, limit: int = 1) -> list[dict[str, Any]]:
         return await self.paginate(f"/repos/{full_name}/commits", limit=limit)
