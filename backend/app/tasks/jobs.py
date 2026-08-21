@@ -16,7 +16,6 @@ from app.services.job_queue import (
     mark_job_failed,
     mark_job_running,
     mark_job_success,
-    update_job_progress,
 )
 from app.tasks.celery_app import celery_app
 
