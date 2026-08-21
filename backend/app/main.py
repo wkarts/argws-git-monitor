@@ -11,7 +11,18 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import ORJSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
-from app.api.routes import auth, dashboard, github, notifications, operations, repositories, system, webhooks
+from app.api.routes import (
+    admin,
+    auth,
+    dashboard,
+    github,
+    jobs,
+    notifications,
+    operations,
+    repositories,
+    system,
+    webhooks,
+)
 from app.core.config import get_settings
 from app.core.database import dispose_engine
 from app.core.logging import configure_logging
@@ -48,7 +59,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="Central mobile-first de monitoramento de repositórios GitHub.",
+    description="Central mobile-first de monitoramento e operação de repositórios GitHub.",
     default_response_class=ORJSONResponse,
     docs_url=f"{settings.api_v1_prefix}/docs",
     redoc_url=f"{settings.api_v1_prefix}/redoc",
@@ -98,8 +109,10 @@ async def metrics() -> Response:
 
 app.include_router(system.router, prefix=settings.api_v1_prefix)
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
+app.include_router(admin.router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
 app.include_router(github.router, prefix=settings.api_v1_prefix)
+app.include_router(jobs.router, prefix=settings.api_v1_prefix)
 app.include_router(repositories.router, prefix=settings.api_v1_prefix)
 app.include_router(operations.router, prefix=settings.api_v1_prefix)
 app.include_router(notifications.router, prefix=settings.api_v1_prefix)
