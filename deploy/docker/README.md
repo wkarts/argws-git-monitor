@@ -5,13 +5,29 @@ Este diretório oferece dois modos independentes de implantação.
 ## Arquivos
 
 ```text
-compose.ghcr.yaml   # usa imagens prontas do GHCR
-compose.local.yaml  # constrói API e Web a partir de ../../backend e ../../frontend
-.env.example        # modelo de variáveis
-generate-env.sh     # gera .env e cria as pastas persistentes
-deploy-ghcr.sh      # pull e deploy pelas imagens publicadas
+compose.ghcr.yaml   # usa imagens :latest prontas do GHCR
+compose.local.yaml  # constrói API e Web :latest a partir de ../../backend e ../../frontend
+.env.example        # modelo de variáveis sem versão/tag
+ generate-env.sh    # gera .env e cria as pastas persistentes
+deploy-ghcr.sh      # pull, recriação e deploy pelas imagens publicadas
 deploy-local.sh     # build e deploy pelo código-fonte
 ```
+
+## Regra de versão
+
+O deploy não recebe `APP_VERSION` nem `IMAGE_TAG`.
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api:latest
+ghcr.io/wkarts/argws-git-monitor-web:latest
+```
+
+A versão exibida é interna ao artefato:
+
+- API: metadata de `argws-git-monitor-api`;
+- frontend: `frontend/package.json`, incorporado no build pelo Vite.
+
+Assim, atualizar a aplicação significa baixar/reconstruir `latest` e recriar os containers; não é necessário editar número de versão no `.env`.
 
 ## Persistência no próprio diretório
 
@@ -42,12 +58,7 @@ bash generate-env.sh
 bash deploy-ghcr.sh
 ```
 
-Imagens utilizadas:
-
-```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.3
-ghcr.io/wkarts/argws-git-monitor-web:0.2.3
-```
+O `deploy-ghcr.sh` executa `pull` e `up --force-recreate`, garantindo que o container em execução use o digest atual de `latest`.
 
 Quando os pacotes estiverem privados:
 
@@ -69,7 +80,7 @@ bash deploy-local.sh
 Execução manual equivalente:
 
 ```bash
-docker compose --env-file .env -f compose.local.yaml up -d --build --remove-orphans
+docker compose --env-file .env -f compose.local.yaml up -d --build --force-recreate --remove-orphans
 ```
 
 ## URL pública ou porta diferente
@@ -81,9 +92,7 @@ bash generate-env.sh \
   --port 8080
 ```
 
-## Atualização de uma instalação 0.2.2 ou anterior
-
-Pare a stack e migre os volumes nomeados antes de iniciar a 0.2.3:
+## Migração de instalações com volumes nomeados
 
 ```bash
 cd deploy/docker
@@ -102,7 +111,7 @@ GHCR:
 docker compose --env-file .env -f compose.ghcr.yaml ps
 docker compose --env-file .env -f compose.ghcr.yaml logs -f --tail=200
 docker compose --env-file .env -f compose.ghcr.yaml pull
-docker compose --env-file .env -f compose.ghcr.yaml up -d --no-build --remove-orphans
+docker compose --env-file .env -f compose.ghcr.yaml up -d --no-build --force-recreate --remove-orphans
 ```
 
 Build local:
@@ -110,7 +119,7 @@ Build local:
 ```bash
 docker compose --env-file .env -f compose.local.yaml ps
 docker compose --env-file .env -f compose.local.yaml logs -f --tail=200
-docker compose --env-file .env -f compose.local.yaml up -d --build --remove-orphans
+docker compose --env-file .env -f compose.local.yaml up -d --build --force-recreate --remove-orphans
 ```
 
 ## Backup
