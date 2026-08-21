@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 — 2026-08-21
+
+- reformula o tema claro com contraste, tipografia, bordas, campos e estados visuais mais legíveis e passa a utilizá-lo como padrão inicial;
+- corrige o fluxo de conexão GitHub para descobrir e persistir imediatamente o catálogo de repositórios;
+- redefine “importar” como “monitorar”: o repositório aparece no monitor imediatamente e apenas o enriquecimento detalhado continua assíncrono;
+- adiciona Fila operacional visível com histórico persistente, progresso, erros, estados e cancelamento;
+- adiciona criação de repositórios diretamente pelo Git Monitor;
+- adiciona alteração de visibilidade público/privado;
+- separa “parar monitoramento” de “excluir definitivamente no GitHub”, com confirmação forte para exclusões;
+- mantém reexecução/cancelamento de Actions e configuração de webhooks conforme as permissões do token;
+- adiciona autenticação em duas etapas TOTP com QR Code e códigos de recuperação;
+- adiciona gestão e revogação de sessões;
+- adiciona painel administrativo responsivo de usuários, privilégios, sessões, 2FA, redefinição de senha e exclusão;
+- adiciona menu Fila e menu Usuários para administradores;
+- remove da interface de login a orientação textual referente ao arquivo de credenciais iniciais;
+- adiciona migration idempotente para instalações existentes e bancos novos;
+- inclui testes do mecanismo TOTP e mantém validação completa do backend, frontend, Docker e deploys;
+- atualiza a série de imagens e pacotes de release para 0.3.0 preservando os bind mounts relativos `./data-*`.
+
 ## 0.2.3 — 2026-08-20
 
 - substitui volumes Docker nomeados por bind mounts relativos em todas as stacks de produção;
