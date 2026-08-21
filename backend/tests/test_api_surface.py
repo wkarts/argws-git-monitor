@@ -6,7 +6,11 @@ from app.main import api_root, app
 
 
 def test_operational_routes_are_registered() -> None:
-    paths = {route.path for route in app.routes}
+    paths = {
+        path
+        for route in app.routes
+        if (path := getattr(route, "path", None)) is not None
+    }
 
     expected = {
         "/api/v1/auth/login",
