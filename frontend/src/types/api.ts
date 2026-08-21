@@ -106,6 +106,14 @@ export interface Release {
   published_at: string | null
 }
 
+export interface HealthComponent {
+  label: string
+  weight: number
+  points: number
+  evaluated: boolean
+  detail: string
+}
+
 export interface Repository {
   id: string
   connection_id: string
@@ -143,6 +151,9 @@ export interface Repository {
   latest_workflow_at: string | null
   health_score: number
   health_status: HealthStatus
+  health_coverage: number
+  health_reasons: string[]
+  health_components: Record<string, HealthComponent>
   monitoring_enabled: boolean
   last_synced_at: string | null
   sync_error: string | null
@@ -176,10 +187,13 @@ export interface DashboardStats {
   attention: number
   failing: number
   unknown: number
+  health_evaluated: number
+  health_pending: number
+  average_health_score: number
+  average_health_coverage: number
   open_pull_requests: number
   open_issues: number
   unread_notifications: number
-  average_health_score: number
 }
 
 export interface DashboardWorkflow extends WorkflowRun {
@@ -245,20 +259,9 @@ export interface PaginatedResponse<T> {
   pages: number
 }
 
-export interface MessageResponse {
-  message: string
-}
-
-export interface SyncResponse {
-  message: string
-  task_id?: string | null
-  job_id?: string | null
-}
-
-export interface WorkflowActionResponse {
-  message: string
-  run_id: number
-}
+export interface MessageResponse { message: string }
+export interface SyncResponse { message: string; task_id?: string | null; job_id?: string | null }
+export interface WorkflowActionResponse { message: string; run_id: number }
 
 export interface WebhookConfigureResult {
   repository: string
@@ -272,19 +275,16 @@ export interface OperationWorkflow extends WorkflowRun {
   repository_full_name: string
   repository_private: boolean
 }
-
 export interface OperationPullRequest extends PullRequest {
   repository_id: string
   repository_full_name: string
   repository_private: boolean
 }
-
 export interface OperationRelease extends Release {
   repository_id: string
   repository_full_name: string
   repository_private: boolean
 }
-
 export interface IssueSummary {
   repository_id: string
   repository_full_name: string
@@ -320,7 +320,27 @@ export interface QueueOverview {
   running: number
   succeeded: number
   failed: number
+  cancelled: number
   total: number
+  worker_online: boolean
+  worker_count: number
+  workers: string[]
+  worker_error: string | null
+}
+
+export interface RuntimeStatus {
+  status: string
+  version: string
+  database: string
+  redis: string
+  worker_online: boolean
+  worker_count: number
+  workers: string[]
+  queued_jobs: number
+  running_jobs: number
+  failed_jobs: number
+  worker_error: string | null
+  timestamp: string
 }
 
 export interface AdminUser {
@@ -337,7 +357,6 @@ export interface AdminUser {
   repository_count: number
   active_session_count: number
 }
-
 export interface AdminOverview {
   total_users: number
   active_users: number
@@ -345,8 +364,24 @@ export interface AdminOverview {
   two_factor_enabled: number
   active_sessions: number
 }
+export interface AdminPasswordResetResponse { message: string; temporary_password: string }
 
-export interface AdminPasswordResetResponse {
+export interface GitHubTreeItem {
+  path: string
+  type: string
+  mode: string
+  sha: string
+  size: number | null
+}
+export interface PackageVersion {
+  id: number
+  name: string
+  url: string | null
+  created_at: string | null
+  updated_at: string | null
+  tags: string[]
+}
+export interface ToolResult {
   message: string
-  temporary_password: string
+  data: Record<string, unknown>
 }
