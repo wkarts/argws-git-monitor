@@ -19,7 +19,11 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-mkdir -p "$ROOT/data-postgres" "$ROOT/data-redis" "$ROOT/data-rabbitmq"
+mkdir -p \
+  "$ROOT/data-postgres" "$ROOT/data-redis" "$ROOT/data-rabbitmq" \
+  "$ROOT/data-logs/api" "$ROOT/data-logs/worker" "$ROOT/data-logs/beat" \
+  "$ROOT/data-logs/migrate" "$ROOT/data-logs/web" "$ROOT/data-logs/postgres" \
+  "$ROOT/data-logs/redis" "$ROOT/data-logs/rabbitmq"
 if [[ -f "$ENV_PATH" && "$FORCE" != true ]]; then
   echo "$ENV_PATH já existe. Use --force para substituir."
   echo "Diretórios relativos preparados em $ROOT/data-*"
@@ -45,6 +49,7 @@ APP_NAME=ARGWS Git Monitor
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
+LOG_RETENTION_DAYS=30
 APP_HTTP_PORT=${PORT}
 APP_BIND_ADDRESS=${BIND_ADDRESS}
 PUBLIC_BASE_URL=${PUBLIC_URL}
@@ -66,7 +71,7 @@ GITHUB_WEBHOOK_SECRET=${WEBHOOK_SECRET}
 GITHUB_REPOSITORY_LIMIT=300
 GITHUB_REQUEST_TIMEOUT_SECONDS=30
 GITHUB_CONCURRENCY=5
-SYNC_INTERVAL_SECONDS=600
+SYNC_INTERVAL_SECONDS=3600
 DEMO_DATA_ENABLED=true
 NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
@@ -82,5 +87,5 @@ Usuário inicial: admin@argws.com.br
 Senha inicial: $ADMIN_PASSWORD
 Imagens: GHCR :latest
 Versão: obtida automaticamente do próprio aplicativo
-Persistência relativa: ./data-postgres, ./data-redis e ./data-rabbitmq.
+Persistência relativa: ./data-postgres, ./data-redis, ./data-rabbitmq e ./data-logs.
 EOF
