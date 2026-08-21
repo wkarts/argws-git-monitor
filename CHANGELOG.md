@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1 — 2026-08-21
+
+- remove `APP_VERSION` de todos os modelos de ambiente e Compose;
+- remove `IMAGE_TAG` de todos os modelos de deploy;
+- faz CloudPanel, Dockge, Portainer e Docker/GHCR consumirem sempre `:latest`;
+- faz o build local produzir imagens `:latest` sem depender de tag externa;
+- altera a API para descobrir a própria versão pelo metadata do pacote Python, com fallback para `VERSION` apenas em execução de código-fonte;
+- altera o frontend para injetar automaticamente a versão do próprio `package.json` durante o build Vite;
+- remove `VITE_APP_VERSION` dos argumentos Docker e dos Composes;
+- atualiza os geradores de `.env` para não gravarem número de versão nem tag de imagem;
+- força recriação de containers após pull de `latest`, evitando manter um container antigo depois da atualização;
+- atualiza a documentação de CloudPanel, Dockge, Portainer e Docker para o fluxo `latest` permanente;
+- preserva os bind mounts relativos `./data-postgres`, `./data-redis` e `./data-rabbitmq`.
+
 ## 0.3.0 — 2026-08-21
 
 - reformula o tema claro com contraste, tipografia, bordas, campos e estados visuais mais legíveis e passa a utilizá-lo como padrão inicial;

@@ -15,7 +15,6 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="sobrescreve .env e credenciais")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
-    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     env_path = ROOT / ".env"
     credentials_path = ROOT / "CREDENCIAIS_INICIAIS.txt"
     data_directories = [
@@ -43,7 +42,6 @@ def main() -> None:
     env_path.write_text(
         f"""COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION={version}
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -74,7 +72,6 @@ NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
 CELERY_CONCURRENCY=2
 CELERY_MAX_TASKS_PER_CHILD=100
-IMAGE_TAG=latest
 INSTALL_SOURCE=ghcr
 """,
         encoding="utf-8",
@@ -88,6 +85,7 @@ RabbitMQ: http://localhost:15672
 Usuário RabbitMQ: gitmonitor
 Senha RabbitMQ: {rabbit_password}
 Dados persistentes: ./data-postgres, ./data-redis e ./data-rabbitmq.
+As imagens GHCR usam sempre :latest e a versão é lida do próprio aplicativo.
 """,
         encoding="utf-8",
     )

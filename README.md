@@ -1,6 +1,6 @@
 # ARGWS Git Monitor
 
-Central operacional **mobile-first** para monitorar e administrar repositórios públicos e privados do GitHub em uma única PWA. A versão 0.3.0 evolui o projeto de um painel de consulta para uma ferramenta operacional com catálogo imediato, fila visível, gestão de repositórios, 2FA e administração de usuários.
+Central operacional **mobile-first** para monitorar e administrar repositórios públicos e privados do GitHub em uma única PWA. A série 0.3.x evolui o projeto de um painel de consulta para uma ferramenta operacional com catálogo imediato, fila visível, gestão de repositórios, 2FA e administração de usuários.
 
 ## Recursos principais
 
@@ -25,7 +25,7 @@ Central operacional **mobile-first** para monitorar e administrar repositórios 
 
 ## Fluxo GitHub
 
-A partir da versão 0.3.0, importar/monitorar um repositório não depende mais da conclusão de uma fila invisível:
+Importar/monitorar um repositório não depende da conclusão de uma fila invisível:
 
 ```text
 GitHub token
@@ -119,6 +119,31 @@ deploy/
 | Dockge | `deploy/dockge/` | Stack pronta para o diretório físico do Dockge |
 | Portainer | `deploy/portainer/` | Stack preparada para Web Editor ou repositório Git |
 | Docker Compose | `deploy/docker/` | Imagens GHCR ou build local |
+
+## Política de imagem e versão
+
+**Todos os modelos de deploy usam `latest`.** Não existe `APP_VERSION` nem `IMAGE_TAG` nos modelos `.env`.
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api:latest
+ghcr.io/wkarts/argws-git-monitor-web:latest
+```
+
+A versão mostrada no produto vem do próprio artefato:
+
+- backend: metadata do pacote Python `argws-git-monitor-api`;
+- frontend: campo `version` do `frontend/package.json`, injetado pelo Vite no build.
+
+`VERSION`, `backend/pyproject.toml` e `frontend/package.json` continuam sincronizados para release/CI, mas não precisam ser copiados para `.env` e não controlam qual imagem o servidor baixa.
+
+Para atualizar uma instalação GHCR:
+
+```bash
+docker compose pull
+docker compose up -d --no-build --force-recreate --remove-orphans
+```
+
+Os scripts de deploy já aplicam esse comportamento.
 
 ## Armazenamento relativo à stack
 
@@ -224,23 +249,7 @@ cd deploy/portainer
 bash generate-stack-env.sh --url https://git.seu-dominio.com.br --bind 127.0.0.1
 ```
 
-Importe `stack.env` em **Environment variables**.
-
-## Imagens Docker
-
-```text
-ghcr.io/wkarts/argws-git-monitor-api:0.3.0
-ghcr.io/wkarts/argws-git-monitor-web:0.3.0
-```
-
-Também são publicadas:
-
-```text
-latest
-sha-<commit>
-0.3.0
-0.3
-```
+Importe `stack.env` em **Environment variables** e habilite o re-pull das imagens ao atualizar a stack.
 
 ## Serviços
 
@@ -275,7 +284,7 @@ Portas padrão:
 
 ## CI/CD
 
-A versão deve coincidir em:
+A versão do código deve coincidir em:
 
 ```text
 VERSION
@@ -283,9 +292,9 @@ backend/pyproject.toml
 frontend/package.json
 ```
 
-O pipeline valida backend, frontend, migrations, deploys e Composes; constrói API/Web para `linux/amd64` e `linux/arm64`; publica no GHCR; inspeciona os manifests; e cria a GitHub Release.
+O pipeline valida backend, frontend, migrations, deploys e Composes; constrói API/Web para `linux/amd64` e `linux/arm64`; publica no GHCR com `latest` e tags históricas; inspeciona os manifests; e cria a GitHub Release.
 
-Versão atual: **0.3.0**. Git tag esperada após merge: **v0.3.0**. Tag Docker: **0.3.0**.
+Versão do código desta entrega: **0.3.1**. Os deploys continuam consumindo **`:latest`**.
 
 ## Documentação
 

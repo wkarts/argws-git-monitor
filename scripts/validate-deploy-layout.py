@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,24 @@ COMPOSE_FILES = {
     "cloudpanel-dockge": ROOT / "deploy/cloudpanel/dockge/compose.yaml",
 }
 
+ENV_MODELS = [
+    ROOT / ".env.example",
+    ROOT / "deploy/docker/.env.example",
+    ROOT / "deploy/dockge/.env.example",
+    ROOT / "deploy/portainer/stack.env.example",
+    ROOT / "deploy/cloudpanel/dockge/.env.example",
+]
+
+ENV_GENERATORS = [
+    ROOT / "scripts/generate-env.sh",
+    ROOT / "scripts/generate-env.ps1",
+    ROOT / "scripts/generate-env.py",
+    ROOT / "deploy/docker/generate-env.sh",
+    ROOT / "deploy/dockge/generate-env.sh",
+    ROOT / "deploy/portainer/generate-stack-env.sh",
+    ROOT / "deploy/cloudpanel/dockge/generate-env.sh",
+]
+
 REQUIRED_FILES = [
     ROOT / "deploy/README.md",
     ROOT / "deploy/migrate-named-volumes.sh",
@@ -50,8 +70,12 @@ REQUIRED_FILES = [
     ROOT / "deploy/cloudpanel/dockge/.env.example",
     ROOT / "deploy/cloudpanel/dockge/generate-env.sh",
     ROOT / "deploy/cloudpanel/dockge/deploy.sh",
+    ROOT / "frontend/Dockerfile",
+    ROOT / "frontend/vite.config.ts",
     DEV_COMPOSE,
     *COMPOSE_FILES.values(),
+    *ENV_MODELS,
+    *ENV_GENERATORS,
 ]
 
 EXPECTED_STORAGE = {
@@ -171,6 +195,13 @@ def validate_dev_storage() -> None:
     ok("compose.dev.yaml: volume de desenvolvimento também usa caminho relativo")
 
 
+def validate_latest_image(name: str, service_name: str, image: str) -> None:
+    if "${IMAGE_TAG" in image or "IMAGE_TAG" in image:
+        fail(f"{name}: {service_name} ainda depende de IMAGE_TAG: {image}")
+    if not image.endswith(":latest"):
+        fail(f"{name}: {service_name} deve usar :latest: {image}")
+
+
 def validate_image_mode(name: str, data: dict[str, Any]) -> None:
     services = data["services"]
     for service_name in ("migrate", "api", "worker", "beat", "web"):
@@ -179,6 +210,7 @@ def validate_image_mode(name: str, data: dict[str, Any]) -> None:
             fail(f"{name}: serviço {service_name} inválido")
         if "build" in service:
             fail(f"{name}: serviço {service_name} não pode conter build")
+        validate_latest_image(name, service_name, str(service.get("image", "")))
 
     api_image = str(services["api"].get("image", ""))
     web_image = str(services["web"].get("image", ""))
@@ -186,7 +218,7 @@ def validate_image_mode(name: str, data: dict[str, Any]) -> None:
         fail(f"{name}: imagem da API ausente")
     if "argws-git-monitor-web" not in web_image:
         fail(f"{name}: imagem Web ausente")
-    ok(f"{name}: implantação por imagens validada")
+    ok(f"{name}: implantação por imagens :latest validada")
 
 
 def validate_local_build(data: dict[str, Any]) -> None:
@@ -199,7 +231,22 @@ def validate_local_build(data: dict[str, Any]) -> None:
         fail("docker-local: contexto de build da API deve ser ../../backend")
     if web_build.get("context") != "../../frontend":
         fail("docker-local: contexto de build da Web deve ser ../../frontend")
-    ok("docker-local: contextos de build local validados")
+    validate_latest_image("docker-local", "api", str(api.get("image", "")))
+    validate_latest_image("docker-local", "web", str(web.get("image", "")))
+    build_args = web_build.get("args", {})
+    if isinstance(build_args, dict) and "VITE_APP_VERSION" in build_args:
+        fail("docker-local: VITE_APP_VERSION não pode vir do deploy")
+    ok("docker-local: build local :latest e contextos validados")
+
+
+def validate_root_local_build(data: dict[str, Any]) -> None:
+    services = data["services"]
+    validate_latest_image("root-local", "api", str(services["api"].get("image", "")))
+    validate_latest_image("root-local", "web", str(services["web"].get("image", "")))
+    build_args = services["web"].get("build", {}).get("args", {})
+    if isinstance(build_args, dict) and "VITE_APP_VERSION" in build_args:
+        fail("root-local: VITE_APP_VERSION não pode vir do deploy")
+    ok("root-local: imagens locais :latest e versão interna validadas")
 
 
 def validate_cloudpanel(data: dict[str, Any]) -> None:
@@ -243,20 +290,72 @@ def validate_migration_script() -> None:
     ok("migrador copia os dados e preserva os volumes antigos")
 
 
-def validate_versions() -> None:
-    version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-    for path in [
-        ROOT / "deploy/docker/.env.example",
-        ROOT / "deploy/dockge/.env.example",
-        ROOT / "deploy/portainer/stack.env.example",
-        ROOT / "deploy/cloudpanel/dockge/.env.example",
-    ]:
+def active_env_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        keys.add(line.split("=", 1)[0].strip())
+    return keys
+
+
+def validate_no_external_version_controls() -> None:
+    forbidden_env = {"APP_VERSION", "IMAGE_TAG", "VITE_APP_VERSION"}
+    for path in ENV_MODELS:
+        present = forbidden_env & active_env_keys(path)
+        if present:
+            fail(
+                f"{path.relative_to(ROOT)} contém variáveis ativas de versão proibidas: "
+                + ", ".join(sorted(present))
+            )
+
+    generator_forbidden = (
+        "APP_VERSION=",
+        "IMAGE_TAG=",
+        "VITE_APP_VERSION=",
+    )
+    for path in ENV_GENERATORS:
         content = path.read_text(encoding="utf-8")
-        if f"APP_VERSION={version}" not in content:
-            fail(f"{path.relative_to(ROOT)} não declara APP_VERSION={version}")
-        if f"IMAGE_TAG={version}" not in content:
-            fail(f"{path.relative_to(ROOT)} não declara IMAGE_TAG={version}")
-    ok(f"versão {version} sincronizada nos ambientes de deploy")
+        present = [marker for marker in generator_forbidden if marker in content]
+        if present:
+            fail(
+                f"{path.relative_to(ROOT)} ainda grava controle externo de versão: "
+                + ", ".join(present)
+            )
+
+    for path in [*COMPOSE_FILES.values(), ROOT / "compose.ghcr.yaml"]:
+        content = path.read_text(encoding="utf-8")
+        if "${APP_VERSION" in content or "${IMAGE_TAG" in content or "VITE_APP_VERSION:" in content:
+            fail(f"{path.relative_to(ROOT)} ainda parametriza versão pelo deploy")
+
+    dockerfile = (ROOT / "frontend/Dockerfile").read_text(encoding="utf-8")
+    if "ARG VITE_APP_VERSION" in dockerfile or "ENV VITE_APP_VERSION" in dockerfile:
+        fail("frontend/Dockerfile não pode receber VITE_APP_VERSION por ARG/ENV")
+
+    vite = (ROOT / "frontend/vite.config.ts").read_text(encoding="utf-8")
+    if "package.json" not in vite or "VITE_APP_VERSION" not in vite:
+        fail("frontend/vite.config.ts deve obter VITE_APP_VERSION do package.json")
+
+    backend_config = (ROOT / "backend/app/core/config.py").read_text(encoding="utf-8")
+    if "package_version(\"argws-git-monitor-api\")" not in backend_config:
+        fail("backend deve descobrir a versão pelo próprio pacote Python")
+
+    ok("deploys não controlam versão; backend e frontend resolvem a própria versão")
+
+
+def validate_source_versions() -> None:
+    declared = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    backend = tomllib.loads((ROOT / "backend/pyproject.toml").read_text(encoding="utf-8"))
+    frontend = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))
+    versions = {
+        "VERSION": declared,
+        "backend": str(backend["project"]["version"]),
+        "frontend": str(frontend["version"]),
+    }
+    if len(set(versions.values())) != 1:
+        fail("Versões internas divergentes: " + ", ".join(f"{k}={v}" for k, v in versions.items()))
+    ok(f"versão interna {declared} sincronizada no código-fonte")
 
 
 def main() -> int:
@@ -268,6 +367,7 @@ def main() -> int:
         validate_relative_storage(name, data)
 
     validate_dev_storage()
+    validate_root_local_build(loaded["root-local"])
     validate_image_mode("root-dockge", loaded["root-dockge"])
     validate_image_mode("docker-ghcr", loaded["docker-ghcr"])
     validate_image_mode("dockge", loaded["dockge"])
@@ -277,9 +377,10 @@ def main() -> int:
     validate_cloudpanel(loaded["cloudpanel-dockge"])
     validate_portainer(loaded["portainer"])
     validate_migration_script()
-    validate_versions()
+    validate_no_external_version_controls()
+    validate_source_versions()
 
-    print("[OK] Estrutura de deploy e armazenamento relativo validados integralmente")
+    print("[OK] Deploys usam :latest, versão interna e armazenamento relativo integralmente")
     return 0
 
 

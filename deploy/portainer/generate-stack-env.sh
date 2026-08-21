@@ -42,7 +42,6 @@ WEBHOOK_SECRET="$(random_urlsafe 48)"
 cat > "$ENV_PATH" <<EOF
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME=ARGWS Git Monitor
-APP_VERSION=0.3.0
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -73,9 +72,6 @@ NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
 CELERY_CONCURRENCY=2
 CELERY_MAX_TASKS_PER_CHILD=100
-IMAGE_TAG=0.3.0
-API_IMAGE=ghcr.io/wkarts/argws-git-monitor-api
-WEB_IMAGE=ghcr.io/wkarts/argws-git-monitor-web
 EOF
 
 chmod 600 "$ENV_PATH" 2>/dev/null || true
@@ -84,5 +80,7 @@ Arquivo criado: $ENV_PATH
 Importe as variáveis no Portainer em Stack > Environment variables.
 Usuário inicial: admin@argws.com.br
 Senha inicial: $ADMIN_PASSWORD
+Imagens: GHCR :latest
+Versão: obtida automaticamente do próprio aplicativo
 Persistência relativa: ./data-postgres, ./data-redis e ./data-rabbitmq.
 EOF

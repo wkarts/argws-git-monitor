@@ -11,9 +11,25 @@ deploy/
 └── migrate-named-volumes.sh
 ```
 
+## Regra de imagem e versão
+
+Todos os deploys baseados em GHCR usam sempre:
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api:latest
+ghcr.io/wkarts/argws-git-monitor-web:latest
+```
+
+Os modelos não possuem `APP_VERSION` nem `IMAGE_TAG`. A versão exibida no produto vem do próprio artefato:
+
+- backend: metadata do pacote Python;
+- frontend: `frontend/package.json`, incorporado pelo Vite no build.
+
+As versões semânticas permanecem apenas no código/release para histórico, CI e rastreabilidade; não são parâmetros do deploy.
+
 ## Regra de armazenamento
 
-Todos os Composes de produção da versão 0.2.3 utilizam bind mounts relativos ao diretório onde o arquivo Compose está armazenado:
+Todos os Composes de produção utilizam bind mounts relativos ao diretório onde o arquivo Compose está armazenado:
 
 ```yaml
 - ./data-postgres:/var/lib/postgresql/data
@@ -85,6 +101,15 @@ bash deploy.sh
 
 Os dados serão gravados no mesmo diretório físico, nas pastas `./data-*`.
 
+Atualização manual:
+
+```bash
+docker compose --env-file .env -f compose.yaml pull
+docker compose --env-file .env -f compose.yaml up -d --no-build --force-recreate --remove-orphans
+```
+
+Na interface: **Pull** seguido de **Update/Deploy**.
+
 ## Portainer
 
 Use:
@@ -103,6 +128,8 @@ bash generate-stack-env.sh --url https://git.seu-dominio.com.br --bind 127.0.0.1
 ```
 
 O Portainer resolve `./data-*` dentro do diretório de trabalho da própria stack.
+
+Nas atualizações, habilite o re-pull da imagem e atualize a stack. Nenhum número de versão precisa ser alterado.
 
 ## Docker Compose
 
@@ -131,9 +158,9 @@ deploy/docker/compose.local.yaml
 
 Nos dois modos, os dados ficam em `deploy/docker/data-*`.
 
-## Migração das versões anteriores
+## Migração das instalações anteriores
 
-Antes do primeiro deploy da versão 0.2.3 em uma instalação existente:
+Quando uma instalação ainda utilizar volumes Docker nomeados:
 
 ```bash
 docker compose down
@@ -141,13 +168,6 @@ bash deploy/migrate-named-volumes.sh --stack-dir /diretorio/fisico/da/stack
 ```
 
 O script copia os volumes nomeados antigos para as pastas relativas e mantém os volumes originais intactos.
-
-## Imagens da versão
-
-```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.3
-ghcr.io/wkarts/argws-git-monitor-web:0.2.3
-```
 
 ## Verificação
 
@@ -160,10 +180,14 @@ O validador confirma:
 - existência dos diretórios e arquivos de implantação;
 - presença dos oito serviços da stack;
 - ausência de build nos pacotes baseados em GHCR;
+- uso obrigatório de `:latest` nos deploys;
+- ausência de controles externos ativos de versão nos modelos;
+- versão interna sincronizada entre `VERSION`, backend e frontend;
+- backend resolvendo sua versão pelo próprio pacote;
+- frontend resolvendo a versão pelo próprio `package.json`;
 - contextos corretos no build local;
 - bind `127.0.0.1` no pacote CloudPanel;
 - reverse proxy Nginx para a porta local;
 - independência de `env_file` no Portainer;
-- sincronização da versão;
 - uso exato de `./data-postgres`, `./data-redis` e `./data-rabbitmq`;
 - ausência de volumes nomeados e caminhos absolutos para dados persistentes.

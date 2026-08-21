@@ -1,10 +1,25 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version as package_version
+from pathlib import Path
 from typing import Literal
 
 from pydantic import EmailStr, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def resolve_app_version() -> str:
+    """Retorna a versão embarcada no próprio artefato, nunca do ambiente de deploy."""
+    try:
+        return package_version("argws-git-monitor-api")
+    except PackageNotFoundError:
+        version_file = Path(__file__).resolve().parents[3] / "VERSION"
+        if version_file.is_file():
+            value = version_file.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+        return "0.0.0+unknown"
 
 
 class Settings(BaseSettings):
@@ -16,7 +31,6 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "ARGWS Git Monitor"
-    app_version: str = "0.3.0"
     app_env: Literal["development", "test", "production"] = "production"
     app_debug: bool = False
     log_level: str = "INFO"
@@ -55,6 +69,10 @@ class Settings(BaseSettings):
     @classmethod
     def strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @property
+    def app_version(self) -> str:
+        return resolve_app_version()
 
     @property
     def cors_origin_list(self) -> list[str]:

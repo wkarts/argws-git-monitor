@@ -11,9 +11,29 @@ deploy/docker/
 
 Consulte `deploy/README.md` para escolher a modalidade correta.
 
+## Política de imagem e versão
+
+Os deploys não controlam a versão da aplicação.
+
+As imagens operacionais são sempre:
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api:latest
+ghcr.io/wkarts/argws-git-monitor-web:latest
+```
+
+Não é necessário, nem recomendado, definir `APP_VERSION` ou `IMAGE_TAG` no `.env`, no Dockge, no Portainer ou no CloudPanel.
+
+A versão mostrada pela aplicação é lida do próprio artefato:
+
+- backend: metadata do pacote Python `argws-git-monitor-api`;
+- frontend: `version` do `frontend/package.json`, incorporada pelo Vite durante o build.
+
+`VERSION`, `backend/pyproject.toml` e `frontend/package.json` continuam sincronizados para CI/release, mas não são parâmetros de implantação.
+
 ## Armazenamento persistente
 
-A versão 0.2.3 mantém os dados dentro do diretório físico de cada stack. Os arquivos Compose utilizam apenas bind mounts relativos:
+Os dados ficam dentro do diretório físico de cada stack. Os arquivos Compose utilizam apenas bind mounts relativos:
 
 ```yaml
 postgres:
@@ -95,11 +115,13 @@ O script:
 - cria `./data-postgres`, `./data-redis` e `./data-rabbitmq`;
 - verifica se ainda existem volumes nomeados antigos;
 - interrompe a atualização quando encontra dados antigos ainda não migrados;
-- usa GHCR ou build local conforme `INSTALL_SOURCE`.
+- usa GHCR ou build local conforme `INSTALL_SOURCE`;
+- no modo GHCR, baixa `:latest`;
+- recria os containers com `--force-recreate`, garantindo que o novo digest seja efetivamente usado.
 
-## Migração das versões 0.2.2 ou anteriores
+## Migração de instalações antigas com volumes nomeados
 
-As versões anteriores utilizavam volumes Docker nomeados. Antes do primeiro deploy da 0.2.3:
+Antes do primeiro deploy usando os bind mounts relativos:
 
 ```bash
 docker compose down
@@ -135,7 +157,13 @@ Depois de validar a aplicação e o backup, os volumes antigos podem ser removid
 ```bash
 cd deploy/docker
 docker compose --env-file .env -f compose.ghcr.yaml pull
-docker compose --env-file .env -f compose.ghcr.yaml up -d --no-build --remove-orphans
+docker compose --env-file .env -f compose.ghcr.yaml up -d --no-build --force-recreate --remove-orphans
+```
+
+Ou simplesmente:
+
+```bash
+bash deploy-ghcr.sh
 ```
 
 ## Atualização pelo Dockge
@@ -143,27 +171,40 @@ docker compose --env-file .env -f compose.ghcr.yaml up -d --no-build --remove-or
 ```bash
 cd /diretorio/fisico/da/stack/argws-git-monitor
 docker compose --env-file .env -f compose.yaml pull
-docker compose --env-file .env -f compose.yaml up -d --no-build --remove-orphans
+docker compose --env-file .env -f compose.yaml up -d --no-build --force-recreate --remove-orphans
 ```
 
-## Imagens versionadas
+Na interface do Dockge: **Pull** e depois **Update/Deploy**.
 
-```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.3
-ghcr.io/wkarts/argws-git-monitor-web:0.2.3
-```
-
-Pull manual:
+## Pull manual
 
 ```bash
-docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.3
-docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.3
+docker pull ghcr.io/wkarts/argws-git-monitor-api:latest
+docker pull ghcr.io/wkarts/argws-git-monitor-web:latest
 ```
 
 Pacotes privados:
 
 ```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin
+```
+
+## Confirmar a versão realmente executada
+
+API:
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/v1/
+```
+
+A resposta informa a versão lida pelo próprio backend.
+
+Imagens e containers:
+
+```bash
+docker compose ps
+docker compose images
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 ```
 
 ## Build local
@@ -173,6 +214,8 @@ cd deploy/docker
 bash generate-env.sh
 bash deploy-local.sh
 ```
+
+O build local também gera imagens `:latest`, enquanto a versão visual continua vindo do código-fonte empacotado.
 
 ## CloudPanel
 
@@ -232,7 +275,7 @@ As pastas `./data-*` permanecem intactas.
 docker compose down -v
 ```
 
-Na versão 0.2.3, esse comando não apaga PostgreSQL, Redis ou RabbitMQ, porque eles são bind mounts relativos e não volumes nomeados.
+Esse comando não apaga PostgreSQL, Redis ou RabbitMQ quando eles estão nos bind mounts relativos `./data-*`.
 
 ## Remoção física completa dos dados
 

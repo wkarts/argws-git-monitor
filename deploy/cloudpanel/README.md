@@ -21,6 +21,17 @@ deploy/cloudpanel/
     └── deploy.sh
 ```
 
+## Regra de imagem e versão
+
+CloudPanel + Dockge usa sempre:
+
+```text
+ghcr.io/wkarts/argws-git-monitor-api:latest
+ghcr.io/wkarts/argws-git-monitor-web:latest
+```
+
+Não configure `APP_VERSION` nem `IMAGE_TAG`. A API obtém a versão do próprio pacote Python e o frontend do próprio `package.json` incorporado no build.
+
 ## Persistência dentro da pasta da stack
 
 Depois que `dockge/` for copiada para o diretório físico de stacks, os dados serão criados ao lado do `compose.yaml`:
@@ -79,9 +90,10 @@ Ou pelo Dockge:
 1. abra `argws-git-monitor`;
 2. valide `compose.yaml`;
 3. confirme as fontes `./data-*`;
-4. execute **Pull** e **Deploy**;
-5. confirme `migrate` concluído;
-6. valide os serviços saudáveis.
+4. execute **Pull**;
+5. execute **Update/Deploy** para recriar os containers;
+6. confirme `migrate` concluído;
+7. valide os serviços saudáveis.
 
 ## 4. Criar o site no CloudPanel
 
@@ -111,12 +123,14 @@ curl -fsS https://git.seu-dominio.com.br/api/v1/health/ready
 ```bash
 cd /caminho/das/stacks/argws-git-monitor
 docker compose --env-file .env -f compose.yaml pull
-docker compose --env-file .env -f compose.yaml up -d --no-build --remove-orphans
+docker compose --env-file .env -f compose.yaml up -d --no-build --force-recreate --remove-orphans
 ```
+
+O `deploy.sh` já executa esse fluxo e sempre utiliza `:latest`.
 
 ## 8. Migração de volumes nomeados antigos
 
-Antes do primeiro deploy da versão 0.2.3 em uma instalação existente:
+Para instalações antigas que ainda utilizem volumes nomeados:
 
 ```bash
 docker compose --env-file .env -f compose.yaml down

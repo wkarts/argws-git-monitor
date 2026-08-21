@@ -4,7 +4,6 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$Version = (Get-Content (Join-Path $Root "VERSION") -Raw).Trim()
 $EnvPath = Join-Path $Root ".env"
 $CredentialsPath = Join-Path $Root "CREDENCIAIS_INICIAIS.txt"
 $DataDirectories = @(
@@ -48,7 +47,6 @@ $Url = "http://localhost:$Port"
 $EnvContent = @"
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=$Version
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -79,7 +77,6 @@ NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
 CELERY_CONCURRENCY=2
 CELERY_MAX_TASKS_PER_CHILD=100
-IMAGE_TAG=latest
 INSTALL_SOURCE=ghcr
 "@
 
@@ -98,6 +95,7 @@ Senha:     $RabbitPassword
 A aplicação exige a troca da senha administrativa no primeiro acesso.
 Este arquivo e o .env estão ignorados pelo Git.
 Dados persistentes: .\data-postgres, .\data-redis e .\data-rabbitmq.
+As imagens GHCR usam sempre :latest e a versão é lida do próprio aplicativo.
 "@
 
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
