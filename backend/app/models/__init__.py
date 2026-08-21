@@ -21,6 +21,7 @@ from app.models.inactivity import (
     InactivityPolicy,
     InactivityPolicyRepository,
 )
+from app.models.issue import Issue
 from app.models.user import RefreshToken, User
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "InactivityActionLog",
     "InactivityPolicy",
     "InactivityPolicyRepository",
+    "Issue",
     "Notification",
     "NotificationSeverity",
     "PullRequest",
