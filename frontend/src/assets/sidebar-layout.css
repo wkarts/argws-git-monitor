@@ -1,10 +1,11 @@
 /*
  * Contrato de layout da sidebar desktop.
  *
- * A sidebar é um flex-column com altura total da viewport. A navegação precisa
- * consumir todo o espaço intermediário e rolar internamente; o card de
- * monitoramento deve permanecer sempre no rodapé, independente da quantidade
- * de itens de menu ou da altura do conteúdo principal.
+ * A sidebar é um flex-column com altura total da viewport. A navegação consome
+ * o espaço intermediário e rola internamente; o card de monitoramento permanece
+ * sempre no rodapé. No estado recolhido o monitor continua visível em formato
+ * compacto e o botão de expansão fica ancorado na borda da sidebar, sem disputar
+ * espaço com o logo.
  */
 @media (min-width: 821px) {
   .sidebar .sidebar-brand {
@@ -22,5 +23,69 @@
   .sidebar .sidebar-monitor {
     flex: 0 0 auto;
     margin-top: auto !important;
+  }
+
+  /* Estado recolhido: logo centralizado e controle preso à borda direita. */
+  .sidebar-is-collapsed .sidebar .sidebar-brand {
+    position: relative;
+    justify-content: center !important;
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+  }
+
+  .sidebar-is-collapsed .sidebar .sidebar-brand .app-logo {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .sidebar-is-collapsed .sidebar .sidebar-toggle {
+    position: absolute !important;
+    z-index: 3;
+    top: 50%;
+    right: -1.6rem;
+    flex: 0 0 auto;
+    transform: translateY(-50%);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /*
+   * O CSS original do componente escondia o card inteiro na sidebar recolhida.
+   * Aqui o contrato do layout o restaura em versão compacta.
+   */
+  .sidebar-is-collapsed .sidebar .sidebar-monitor {
+    display: flex !important;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .2rem;
+    width: 100%;
+    min-height: 4.4rem;
+    margin-top: auto !important;
+    padding: .42rem .28rem;
+  }
+
+  .sidebar-is-collapsed .sidebar .sidebar-monitor .monitor-heading {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .sidebar-is-collapsed .sidebar .sidebar-monitor .monitor-heading span,
+  .sidebar-is-collapsed .sidebar .sidebar-monitor > strong,
+  .sidebar-is-collapsed .sidebar .sidebar-monitor > small {
+    display: none !important;
+  }
+
+  .sidebar-is-collapsed .sidebar .sidebar-monitor .monitor-heading i {
+    width: .58rem;
+    height: .58rem;
+  }
+
+  .sidebar-is-collapsed .sidebar .sidebar-monitor svg {
+    display: block;
+    width: 100%;
+    height: 2.15rem;
+    margin: 0;
   }
 }
