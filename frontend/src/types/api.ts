@@ -149,6 +149,10 @@ export interface Repository {
   latest_workflow_conclusion: string | null
   latest_workflow_url: string | null
   latest_workflow_at: string | null
+  last_activity_at: string | null
+  last_activity_type: string | null
+  last_activity_summary: string | null
+  activity_observed_at: string | null
   health_score: number
   health_status: HealthStatus
   health_coverage: number
@@ -384,4 +388,47 @@ export interface PackageVersion {
 export interface ToolResult {
   message: string
   data: Record<string, unknown>
+}
+
+export interface InactivityPolicy {
+  id: string
+  user_id: string
+  name: string
+  description: string | null
+  timeout_value: number
+  timeout_unit: 'hours' | 'days' | 'weeks' | 'months'
+  action: 'private' | 'notify'
+  enabled: boolean
+  activity_sources: string[]
+  last_evaluated_at: string | null
+  created_at: string
+  updated_at: string
+  repository_ids: string[]
+  repository_count: number
+}
+
+export interface InactivityActionLog {
+  id: string
+  policy_id: string | null
+  repository_id: string | null
+  repository_full_name: string
+  action: string
+  status: string
+  previous_private: boolean | null
+  last_activity_at: string | null
+  threshold_at: string | null
+  reason: string
+  result: Record<string, unknown>
+  error: string | null
+  created_at: string
+}
+
+export interface InactivityEvaluationResult {
+  policies: number
+  repositories: number
+  due: number
+  privatized: number
+  notified: number
+  skipped: number
+  failed: number
 }
