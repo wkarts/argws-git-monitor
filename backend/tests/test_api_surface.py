@@ -21,8 +21,9 @@ def test_operational_routes_are_registered() -> None:
         "/api/v1/github/connections/{connection_id}/repositories",
         "/api/v1/repositories",
         "/api/v1/repositories/{repository_id}",
-        "/api/v1/repositories/{repository_id}/visibility",
         "/api/v1/repositories/{repository_id}/github",
+        "/api/v1/repositories/{repository_id}/monitoring",
+        "/api/v1/repositories/{repository_id}/delete-github",
         "/api/v1/jobs",
         "/api/v1/jobs/overview",
         "/api/v1/admin/users",
@@ -39,7 +40,8 @@ def test_openapi_exposes_control_center_groups() -> None:
     assert "/api/v1/jobs" in paths
     assert "/api/v1/admin/users" in paths
     assert "/api/v1/auth/2fa/setup" in paths
-    assert "/api/v1/repositories/{repository_id}/visibility" in paths
+    assert "/api/v1/repositories/{repository_id}/github" in paths
+    assert "/api/v1/repositories/{repository_id}/delete-github" in paths
 
 
 @pytest.mark.asyncio
