@@ -1,4 +1,11 @@
-from app.models.activity import AuditLog, Notification, NotificationSeverity, WebhookDelivery
+from app.models.activity import (
+    AuditLog,
+    Notification,
+    NotificationSeverity,
+    SyncJob,
+    SyncJobStatus,
+    WebhookDelivery,
+)
 from app.models.base import Base
 from app.models.github import (
     ConnectionStatus,
@@ -23,6 +30,8 @@ __all__ = [
     "RefreshToken",
     "Release",
     "Repository",
+    "SyncJob",
+    "SyncJobStatus",
     "User",
     "WebhookDelivery",
     "WorkflowRun",
