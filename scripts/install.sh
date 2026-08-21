@@ -24,7 +24,10 @@ command -v docker >/dev/null 2>&1 || fail "Docker não encontrado. Instale Docke
 docker compose version >/dev/null 2>&1 || fail "O plugin 'docker compose' não está disponível."
 docker info >/dev/null 2>&1 || fail "O serviço Docker não está em execução ou o usuário não possui permissão."
 
-mkdir -p data-postgres data-redis data-rabbitmq
+mkdir -p \
+  data-postgres data-redis data-rabbitmq \
+  data-logs/api data-logs/worker data-logs/beat data-logs/migrate \
+  data-logs/web data-logs/postgres data-logs/redis data-logs/rabbitmq
 
 if [[ ! -f .env ]]; then
   scripts/generate-env.sh
@@ -86,4 +89,4 @@ printf '\nAplicação: %s\n' "$PUBLIC_URL"
 printf 'Imagens: :latest\n'
 printf 'Versão: lida do próprio aplicativo\n'
 printf 'Credenciais: %s/CREDENCIAIS_INICIAIS.txt\n' "$ROOT"
-printf 'Persistência: %s/data-postgres, %s/data-redis e %s/data-rabbitmq\n\n' "$ROOT" "$ROOT" "$ROOT"
+printf 'Persistência: %s/data-postgres, %s/data-redis, %s/data-rabbitmq e %s/data-logs\n\n' "$ROOT" "$ROOT" "$ROOT" "$ROOT"
