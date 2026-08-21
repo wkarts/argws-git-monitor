@@ -77,6 +77,7 @@ class Repository(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint("connection_id", "github_id", name="uq_repositories_connection_github"),
         Index("ix_repositories_health", "health_status", "health_score"),
         Index("ix_repositories_full_name", "full_name"),
+        Index("ix_repositories_last_activity", "last_activity_at"),
     )
 
     connection_id: Mapped[uuid.UUID] = mapped_column(
@@ -120,6 +121,11 @@ class Repository(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     latest_workflow_conclusion: Mapped[str | None] = mapped_column(String(50))
     latest_workflow_url: Mapped[str | None] = mapped_column(String(1000))
     latest_workflow_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_activity_type: Mapped[str | None] = mapped_column(String(60))
+    last_activity_summary: Mapped[str | None] = mapped_column(String(1000))
+    activity_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     health_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     health_status: Mapped[HealthStatus] = mapped_column(
