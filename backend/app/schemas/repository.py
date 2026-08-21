@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.github import HealthStatus
 from app.schemas.common import ORMModel
+from app.services.health import calculate_repository_health
 
 
 class WorkflowRunRead(ORMModel):
@@ -97,9 +99,32 @@ class RepositoryRead(ORMModel):
     latest_workflow_at: datetime | None
     health_score: int
     health_status: HealthStatus
+    health_coverage: int = 0
+    health_reasons: list[str] = Field(default_factory=list)
+    health_components: dict[str, dict[str, Any]] = Field(default_factory=dict)
     monitoring_enabled: bool
     last_synced_at: datetime | None
     sync_error: str | None
+
+    @model_validator(mode="after")
+    def calculate_explainable_health(self) -> RepositoryRead:
+        result = calculate_repository_health(
+            archived=self.archived,
+            disabled=self.disabled,
+            sync_error=self.sync_error,
+            last_synced_at=self.last_synced_at,
+            pushed_at=self.pushed_at,
+            latest_workflow_status=self.latest_workflow_status,
+            latest_workflow_conclusion=self.latest_workflow_conclusion,
+            open_pr_count=self.open_pr_count,
+            open_issue_count=self.open_issue_count,
+        )
+        self.health_score = result.score
+        self.health_status = result.status
+        self.health_coverage = result.coverage
+        self.health_reasons = list(result.reasons)
+        self.health_components = result.components
+        return self
 
 
 class RepositoryDetail(RepositoryRead):
