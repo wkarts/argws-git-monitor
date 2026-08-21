@@ -1,7 +1,7 @@
 name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
 # Stack Dockge: imagens oficiais sempre em :latest.
-# A versão exibida é determinada pelo próprio aplicativo, não pelo deploy.
+# Dados e logs permanecem em ./data-* dentro da pasta da stack.
 
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
@@ -37,13 +37,27 @@ x-api-service: &api-service
   environment: *app-environment
   volumes:
     - ./data-logs:/var/log/argws-stack
-  networks:
-    - gitmonitor
-  security_opt:
-    - no-new-privileges:true
+  networks: [gitmonitor]
+  security_opt: ["no-new-privileges:true"]
   init: true
 
 services:
+  logs-init:
+    image: alpine:3.21
+    restart: "no"
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - |
+        for dir in api worker beat migrate web postgres redis rabbitmq; do
+          mkdir -p "/logs/$dir"
+        done
+        chmod -R a+rwx /logs
+    volumes:
+      - ./data-logs:/logs
+    security_opt: ["no-new-privileges:true"]
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -56,6 +70,8 @@ services:
       - ./data-postgres:/var/lib/postgresql/data
       - ./data-logs/postgres:/var/log/postgresql
     networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gitmonitor} -d ${POSTGRES_DB:-gitmonitor}"]
       interval: 10s
@@ -72,6 +88,8 @@ services:
       - ./data-redis:/data
       - ./data-logs/redis:/var/log/redis
     networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -93,6 +111,8 @@ services:
     ports:
       - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
