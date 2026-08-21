@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.core.database import dispose_engine, session_scope
-from app.models.activity import Notification, SyncJob
+from app.models.activity import Notification, SyncJob, SyncJobStatus
 from app.models.github import ConnectionStatus, GitHubConnection
 from app.services.github_sync import sync_connection, sync_repository
 from app.services.job_queue import (
@@ -30,17 +31,21 @@ def run_async(coro):
     return asyncio.run(runner())
 
 
+async def _mark_retry(job_id: str, retries: int) -> None:
+    async with session_scope() as session:
+        job = await session.get(SyncJob, uuid.UUID(job_id))
+        if not job or job.status == SyncJobStatus.CANCELLED:
+            return
+        job.status = SyncJobStatus.QUEUED
+        job.message = f"Falha temporária. Nova tentativa {retries + 2} agendada."
+
+
 def _retry_or_fail(self, exc: Exception, job_id: str | None, *, max_countdown: int) -> None:
     if job_id:
         if self.request.retries >= self.max_retries:
             run_async(mark_job_failed(job_id, error=str(exc)))
         else:
-            run_async(
-                update_job_progress(
-                    job_id,
-                    message=f"Falha temporária. Nova tentativa {self.request.retries + 2} agendada.",
-                )
-            )
+            run_async(_mark_retry(job_id, self.request.retries))
     raise self.retry(exc=exc, countdown=min(30 * (self.request.retries + 1), max_countdown))
 
 
@@ -98,7 +103,7 @@ async def _sync_all_connections() -> dict[str, int]:
     for connection_id, job_id in jobs:
         task = sync_connection_task.delay(connection_id, None, job_id)
         async with session_scope() as session:
-            job = await session.get(SyncJob, job_id)
+            job = await session.get(SyncJob, uuid.UUID(job_id))
             if job:
                 job.celery_task_id = task.id
     return {"queued": len(jobs)}
