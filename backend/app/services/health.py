@@ -54,14 +54,19 @@ def calculate_repository_health(
     latest_workflow_conclusion: str | None,
     open_pr_count: int,
     open_issue_count: int,
+    ci_configured: bool | None = None,
     last_synced_at: datetime | None | object = _UNSET,
     now: datetime | None = None,
 ) -> HealthResult:
-    """Calcula saúde somente sobre evidências observadas.
+    """Calcula saúde somente com evidências observadas.
 
-    Quando ``last_synced_at`` é explicitamente ``None`` o repositório ainda não
-    possui uma leitura detalhada e fica UNKNOWN. A omissão desse argumento mantém
-    compatibilidade com o cálculo executado dentro do próprio ciclo de sync.
+    ``ci_configured`` tem três estados:
+    - ``True``: workflows foram observados no GitHub;
+    - ``False``: endpoint de Actions foi consultado e não há workflows;
+    - ``None``: não foi possível observar o endpoint de Actions.
+
+    Um repositório sem primeira sincronização detalhada recebe UNKNOWN/0, nunca um
+    percentual padrão artificial.
     """
 
     current_time = now or datetime.now(UTC)
@@ -153,21 +158,14 @@ def calculate_repository_health(
 
     normalized_status = (latest_workflow_status or "").lower()
     normalized_conclusion = (latest_workflow_conclusion or "").lower()
-    has_ci = bool(normalized_status or normalized_conclusion)
-    if not has_ci:
-        components["ci"] = _component(
-            label="CI/CD",
-            weight=25,
-            points=0,
-            evaluated=False,
-            detail="Nenhum GitHub Actions localizado (não avaliado)",
-        )
-    elif normalized_status in RUNNING_STATUSES:
+    has_run = bool(normalized_status or normalized_conclusion)
+
+    if has_run and normalized_status in RUNNING_STATUSES:
         components["ci"] = _component(
             label="CI/CD", weight=25, points=20, detail="Workflow em execução"
         )
         reasons.append("Workflow em execução")
-    elif normalized_conclusion in FAILURE_CONCLUSIONS:
+    elif has_run and normalized_conclusion in FAILURE_CONCLUSIONS:
         components["ci"] = _component(
             label="CI/CD",
             weight=25,
@@ -175,20 +173,45 @@ def calculate_repository_health(
             detail=f"Último workflow: {normalized_conclusion}",
         )
         reasons.append(f"Último workflow terminou como {normalized_conclusion}")
-    elif normalized_conclusion in {"neutral", "skipped"}:
+    elif has_run and normalized_conclusion in {"neutral", "skipped"}:
         components["ci"] = _component(
             label="CI/CD",
             weight=25,
             points=18,
             detail=f"Último workflow: {normalized_conclusion}",
         )
-    else:
+    elif has_run:
         components["ci"] = _component(
             label="CI/CD",
             weight=25,
             points=25,
             detail=f"Último workflow: {normalized_conclusion or normalized_status}",
         )
+    elif ci_configured is True:
+        components["ci"] = _component(
+            label="CI/CD",
+            weight=25,
+            points=20,
+            detail="Workflow configurado, mas sem execução recente localizada",
+        )
+        reasons.append("CI configurada sem execução recente")
+    elif ci_configured is False:
+        components["ci"] = _component(
+            label="CI/CD",
+            weight=25,
+            points=0,
+            evaluated=False,
+            detail="Repositório não possui workflow GitHub Actions",
+        )
+    else:
+        components["ci"] = _component(
+            label="CI/CD",
+            weight=25,
+            points=0,
+            evaluated=False,
+            detail="GitHub Actions não pôde ser observado; verifique sincronização/permissões",
+        )
+        reasons.append("CI/CD não pôde ser observado")
 
     backlog_points = 10
     backlog_notes: list[str] = []
@@ -236,6 +259,6 @@ def calculate_repository_health(
         score=score,
         status=status,
         coverage=coverage,
-        reasons=tuple(reasons),
+        reasons=tuple(dict.fromkeys(reasons)),
         components=components,
     )
