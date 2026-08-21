@@ -5,7 +5,7 @@ export type ThemePreference = 'dark' | 'light' | 'system'
 const STORAGE_KEY = 'argws-git-monitor.theme'
 
 export const useThemeStore = defineStore('theme', () => {
-  const preference = ref<ThemePreference>('dark')
+  const preference = ref<ThemePreference>('light')
 
   function resolvedTheme(): 'dark' | 'light' {
     if (preference.value !== 'system') return preference.value
@@ -18,7 +18,7 @@ export const useThemeStore = defineStore('theme', () => {
 
   function initialize(): void {
     const saved = localStorage.getItem(STORAGE_KEY) as ThemePreference | null
-    preference.value = saved && ['dark', 'light', 'system'].includes(saved) ? saved : 'dark'
+    preference.value = saved && ['dark', 'light', 'system'].includes(saved) ? saved : 'light'
     apply()
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
       if (preference.value === 'system') apply()
