@@ -72,18 +72,19 @@ fi
 "${compose[@]}" config -q
 
 if [[ "$INSTALL_SOURCE" == "local" ]]; then
-  info "Reconstruindo as imagens locais"
-  "${compose[@]}" up -d --build --remove-orphans
+  info "Reconstruindo imagens locais :latest"
+  "${compose[@]}" up -d --build --force-recreate --remove-orphans
 else
-  info "Atualizando imagens pelo GHCR"
+  info "Atualizando imagens GHCR :latest"
   if "${compose[@]}" pull; then
-    "${compose[@]}" up -d --no-build --remove-orphans
+    "${compose[@]}" up -d --no-build --force-recreate --remove-orphans
   else
     warning "Falha no pull do GHCR. Será realizado build local como contingência."
     compose=(docker compose -f compose.yaml)
-    "${compose[@]}" up -d --build --remove-orphans
+    "${compose[@]}" up -d --build --force-recreate --remove-orphans
   fi
 fi
 
 docker image prune -f >/dev/null 2>&1 || true
 "${compose[@]}" ps
+info "Atualização concluída. A versão é lida do próprio aplicativo."
