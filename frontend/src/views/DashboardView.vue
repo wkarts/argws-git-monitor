@@ -81,7 +81,7 @@ const healthRows = computed(() => {
     { label: 'OK', count: data.value.stats.healthy, tone: 'success' },
     { label: 'Executando', count: data.value.stats.running, tone: 'warning' },
     { label: 'Falhou / atenção', count: criticalCount.value, tone: 'danger' },
-    { label: 'Desconectado', count: data.value.stats.unknown, tone: 'neutral' }
+    { label: 'Aguardando dados', count: data.value.stats.unknown, tone: 'neutral' }
   ]
   return rows.map((row) => ({ ...row, percent: Math.round((row.count / total) * 100) }))
 })
@@ -183,7 +183,7 @@ async function syncAll(): Promise<void> {
     await Promise.all(
       realConnections.value.map((connection) => api.post<SyncResponse>(`/github/connections/${connection.id}/sync`))
     )
-    toasts.success('Sincronização iniciada', 'Os workers atualizarão todos os repositórios monitorados.')
+    toasts.success('Sincronização iniciada', 'Acompanhe o progresso real em Fila. Se o worker estiver offline, a operação será recusada em vez de criar fila fantasma.')
     window.setTimeout(() => void load(true), 5000)
   } catch (error) {
     toasts.error('Não foi possível sincronizar', error instanceof ApiError ? error.message : undefined)
@@ -208,7 +208,7 @@ onBeforeUnmount(() => {
       <div>
         <span>MONITORAMENTO EM TEMPO REAL</span>
         <h2>Visão geral dos repositórios</h2>
-        <p>Saúde, CI/CD, pull requests, releases e alertas em um único painel.</p>
+        <p>Saúde explicável, atividade, CI/CD, pull requests, releases e alertas em um único painel.</p>
       </div>
       <button class="button secondary" :disabled="syncing" @click="syncAll">
         <RefreshCw :size="16" :class="{ spin: syncing }" />
@@ -245,8 +245,8 @@ onBeforeUnmount(() => {
         <div class="mobile-health-summary-top">
           <div class="mobile-health-score">
             <span>Saúde geral</span>
-            <strong>{{ Math.round(data.stats.average_health_score) }}%</strong>
-            <small>saúde geral</small>
+            <strong>{{ data.stats.health_evaluated ? `${Math.round(data.stats.average_health_score)}%` : '—' }}</strong>
+            <small>{{ data.stats.health_evaluated }}/{{ data.stats.total_repositories }} avaliados · cobertura média {{ data.stats.average_health_coverage }}%</small>
           </div>
           <div class="mobile-health-ring" :style="mobileHealthRingStyle"><i /></div>
         </div>
@@ -261,7 +261,7 @@ onBeforeUnmount(() => {
 
       <section class="dashboard-overview-grid">
         <article class="monitor-panel health-overview-panel">
-          <header><div><h3>Saúde geral dos repositórios</h3><span>Índice consolidado da operação</span></div><CircleDot :size="16" /></header>
+          <header><div><h3>Saúde geral dos repositórios</h3><span>{{ data.stats.health_evaluated }} avaliados · {{ data.stats.health_pending }} aguardando dados · cobertura média {{ data.stats.average_health_coverage }}%</span></div><CircleDot :size="16" /></header>
           <div class="health-overview-content">
             <HealthDonut
               :score="data.stats.average_health_score"
@@ -290,7 +290,7 @@ onBeforeUnmount(() => {
               <small>{{ formatRelative(item.date) }}</small>
             </RouterLink>
           </div>
-          <EmptyState v-else :icon="Activity" title="Sem atividades" message="As atividades aparecerão após a primeira sincronização." />
+          <EmptyState v-else :icon="Activity" title="Sem atividades" message="As atividades aparecerão após a primeira sincronização detalhada." />
           <RouterLink to="/notifications" class="panel-link">Ver todas as atividades <ChevronRight :size="14" /></RouterLink>
         </article>
       </section>
@@ -315,7 +315,7 @@ onBeforeUnmount(() => {
                 </td>
                 <td><StatusBadge :value="repository.health_status" health compact /></td>
                 <td><StatusBadge :value="workflowStatus(repository)" compact /><small class="workflow-name">{{ repository.latest_workflow_name || 'Sem workflow' }}</small></td>
-                <td>{{ formatRelative(repository.latest_workflow_at || repository.pushed_at || repository.last_synced_at) }}</td>
+                <td :title="repository.last_activity_summary || undefined">{{ formatRelative(repository.last_activity_at || repository.pushed_at || repository.last_synced_at) }}</td>
                 <td><code>{{ repository.default_branch }}</code></td>
                 <td><a :href="repository.html_url" target="_blank" rel="noopener noreferrer" class="repository-github-link" title="Abrir no GitHub"><Github :size="17" /></a><RouterLink :to="`/repositories/${repository.id}`" class="repository-github-link" title="Ver detalhes"><ChevronRight :size="17" /></RouterLink></td>
               </tr>
@@ -327,7 +327,7 @@ onBeforeUnmount(() => {
           <RouterLink v-for="repository in filteredRepositories.slice(0, 4)" :key="repository.id" :to="`/repositories/${repository.id}`">
             <span class="repository-privacy"><LockKeyhole v-if="repository.private" :size="13" /><Globe2 v-else :size="13" /></span>
             <strong>{{ repository.name }}</strong>
-            <span class="mobile-repository-state" :class="`health-${repository.health_status}`"><i />{{ repository.health_status === 'healthy' ? 'OK' : repository.health_status === 'running' ? 'Executando' : repository.health_status === 'failing' ? 'Falhou' : repository.health_status === 'attention' ? 'Atenção' : 'Sem CI' }}</span>
+            <span class="mobile-repository-state" :class="`health-${repository.health_status}`"><i />{{ repository.health_status === 'healthy' ? 'OK' : repository.health_status === 'running' ? 'Executando' : repository.health_status === 'failing' ? 'Falhou' : repository.health_status === 'attention' ? 'Atenção' : 'Aguardando' }}</span>
             <ChevronRight :size="15" />
           </RouterLink>
         </div>
@@ -339,10 +339,10 @@ onBeforeUnmount(() => {
       <RouterLink v-if="criticalRepository" :to="`/repositories/${criticalRepository.id}`" class="mobile-critical-card">
         <div class="critical-icon"><XCircle :size="24" /></div>
         <div class="critical-copy">
-          <span>FALHA DE BUILD · {{ formatRelative(criticalRepository.latest_workflow_at) }}</span>
+          <span>REPOSITÓRIO EM ATENÇÃO · {{ formatRelative(criticalRepository.last_activity_at || criticalRepository.latest_workflow_at) }}</span>
           <strong>{{ criticalRepository.name }}</strong>
-          <p>{{ criticalRepository.latest_workflow_name || 'A execução mais recente precisa de atenção.' }}</p>
-          <small>Branch: {{ criticalRepository.default_branch }} · Workflow monitorado</small>
+          <p>{{ criticalRepository.health_reasons[0] || criticalRepository.latest_workflow_name || 'A condição mais recente precisa de atenção.' }}</p>
+          <small>Branch: {{ criticalRepository.default_branch }} · score {{ criticalRepository.health_score }}% · cobertura {{ criticalRepository.health_coverage }}%</small>
         </div>
         <ChevronRight :size="18" />
       </RouterLink>
@@ -435,15 +435,7 @@ onBeforeUnmount(() => {
 @media (max-width: 899px) {
   .dashboard-toolbar { display: none; }
   .demo-banner,.overview-metrics,.dashboard-overview-grid { display: none; }
-  .mobile-health-summary {
-    display: grid;
-    gap: 0.7rem;
-    padding: 0.9rem;
-    border: 1px solid var(--border);
-    border-radius: 0.78rem;
-    background: linear-gradient(145deg, var(--surface), var(--surface-raised));
-    box-shadow: var(--shadow-sm);
-  }
+  .mobile-health-summary { display: grid; gap: 0.7rem; padding: 0.9rem; border: 1px solid var(--border); border-radius: 0.78rem; background: linear-gradient(145deg, var(--surface), var(--surface-raised)); box-shadow: var(--shadow-sm); }
   .mobile-health-summary-top { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
   .mobile-health-score { display: grid; }
   .mobile-health-score span { color: var(--text-muted); font-size: 0.61rem; }
