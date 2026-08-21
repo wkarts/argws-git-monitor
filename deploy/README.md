@@ -1,16 +1,13 @@
 # Deploys do ARGWS Git Monitor
 
-Este diretório concentra os arquivos de implantação separados por ambiente. Cada pasta contém o `compose.yaml`, o modelo de variáveis e as instruções específicas da plataforma.
-
-## Estrutura
+Este diretório concentra os pacotes de implantação separados por ambiente.
 
 ```text
 deploy/
 ├── migrate-named-volumes.sh
 ├── cloudpanel/
 │   ├── README.md
-│   ├── nginx/
-│   │   └── argws-git-monitor.conf
+│   ├── nginx/argws-git-monitor.conf
 │   └── dockge/
 │       ├── compose.yaml
 │       ├── .env.example
@@ -41,14 +38,14 @@ deploy/
 
 | Ambiente | Diretório | Finalidade |
 |---|---|---|
-| CloudPanel + Dockge | `deploy/cloudpanel/` | Containers no Dockge e domínio/HTTPS por reverse proxy no CloudPanel |
-| Dockge | `deploy/dockge/` | Stack pronta para copiar ao diretório físico de stacks |
-| Portainer | `deploy/portainer/` | Stack compatível com Web Editor ou repositório Git |
-| Docker Compose | `deploy/docker/` | Execução por GHCR ou build local |
+| CloudPanel + Dockge | `deploy/cloudpanel/` | containers no Dockge e domínio/HTTPS no CloudPanel |
+| Dockge | `deploy/dockge/` | stack pronta para o diretório físico do Dockge |
+| Portainer | `deploy/portainer/` | Web Editor ou repositório Git com variáveis do painel |
+| Docker Compose | `deploy/docker/` | execução por GHCR ou build local |
 
 ## Persistência obrigatoriamente relativa
 
-Os bancos e filas não usam volumes nomeados nem caminhos absolutos do Linux. Cada `compose.yaml` grava dentro do próprio diretório da stack:
+Todos os pacotes persistem dados ao lado do `compose.yaml`:
 
 ```yaml
 postgres:
@@ -64,43 +61,41 @@ rabbitmq:
     - ./data-rabbitmq:/var/lib/rabbitmq
 ```
 
-A estrutura criada ao lado do Compose é:
+Resultado:
 
 ```text
-./data-postgres/
-./data-redis/
-./data-rabbitmq/
+pasta-da-stack/
+├── compose.yaml
+├── .env
+├── data-postgres/
+├── data-redis/
+└── data-rabbitmq/
 ```
 
-Assim, ao copiar, mover ou fazer backup do diretório da stack, os dados persistentes permanecem agrupados com ela. Os geradores e scripts de deploy criam essas pastas automaticamente.
+Não são usados caminhos absolutos do host nem volumes Docker nomeados para os dados principais.
 
-## Migração da versão anterior
-
-As versões anteriores usavam volumes Docker nomeados. Antes de atualizar uma instalação que já possui dados:
+## Migração de versões antigas
 
 ```bash
 docker compose down
 bash deploy/migrate-named-volumes.sh --stack-dir /caminho/da/stack
 ```
 
-O script copia os dados para `./data-*` e preserva os volumes antigos para rollback. Ele não sobrescreve diretórios que já contenham arquivos.
+O migrador copia os dados para `./data-*` e preserva os volumes antigos para rollback.
 
-## Imagens oficiais
+## Imagens oficiais v0.3.0
 
 ```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.3
-ghcr.io/wkarts/argws-git-monitor-web:0.2.3
+ghcr.io/wkarts/argws-git-monitor-api:0.3.0
+ghcr.io/wkarts/argws-git-monitor-web:0.3.0
 ```
 
-Também são publicadas as tags `latest`, `0.2` e `sha-<commit>`.
+Também são publicadas `latest`, `0.3` e `sha-<commit>`.
 
-## Requisitos comuns
+## Segurança
 
-- Docker Engine ou Docker Desktop com Docker Compose v2;
-- acesso ao GHCR ou código-fonte para build local;
-- uma porta livre, por padrão `8080`;
-- domínio e HTTPS para acesso público e webhooks;
-- segredos gerados antes do primeiro deploy;
-- backup externo periódico de todo o diretório da stack.
-
-Nenhum `.env`, senha, token, credencial ou conteúdo das pastas `data-*` deve ser enviado ao GitHub.
+- não versione `.env`, `stack.env`, tokens, chaves ou senhas;
+- mantenha PostgreSQL, Redis e AMQP sem publicação externa;
+- use HTTPS para webhooks;
+- faça backup externo das pastas persistentes e do PostgreSQL;
+- no CloudPanel, mantenha a Web ligada a `127.0.0.1` e publique somente pelo reverse proxy.
