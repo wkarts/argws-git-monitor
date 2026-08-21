@@ -35,6 +35,22 @@ class GitHubConnectionRead(ORMModel):
     oauth_scopes: list[str] = Field(default_factory=list)
 
 
+class GitHubConnectionDiagnostics(BaseModel):
+    connected: bool
+    github_login: str
+    accessible_repositories: int
+    private_repositories: int
+    writable_repositories: int
+    admin_repositories: int
+    actions_samples_checked: int
+    actions_samples_observed: int
+    rate_limit_remaining: int | None
+    rate_limit_reset_at: datetime | None
+    oauth_scopes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    checked_at: datetime
+
+
 class GitHubRemoteRepository(BaseModel):
     github_id: int
     owner: str
