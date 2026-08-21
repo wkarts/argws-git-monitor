@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from app.models.github import ConnectionStatus
 from app.schemas.common import ORMModel
@@ -31,6 +31,8 @@ class GitHubConnectionRead(ORMModel):
     rate_limit_reset_at: datetime | None
     created_at: datetime
     repository_count: int = 0
+    available_repository_count: int = 0
+    oauth_scopes: list[str] = []
 
 
 class GitHubRemoteRepository(BaseModel):
@@ -45,15 +47,41 @@ class GitHubRemoteRepository(BaseModel):
     default_branch: str
     language: str | None = None
     selected: bool = False
+    permissions: dict[str, bool] = {}
 
 
 class RepositoryImportRequest(BaseModel):
     repository_ids: list[int] = Field(min_length=1, max_length=500)
 
 
+class RepositoryImportResponse(BaseModel):
+    message: str
+    imported_count: int
+    already_monitored_count: int
+    queued_count: int
+    repository_ids: list[uuid.UUID]
+    job_ids: list[uuid.UUID]
+
+
+class GitHubRepositoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=350)
+    private: bool = True
+    auto_init: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Nome do repositório é obrigatório.")
+        return normalized
+
+
 class SyncAcceptedResponse(BaseModel):
     message: str
     task_id: str | None = None
+    job_id: uuid.UUID | None = None
 
 
 class WebhookConfigureRequest(BaseModel):
