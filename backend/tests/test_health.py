@@ -16,6 +16,7 @@ def test_successful_active_repository_is_healthy():
         open_issue_count=5,
     )
     assert result.score == 100
+    assert result.coverage == 100
     assert result.status == HealthStatus.HEALTHY
 
 
@@ -30,8 +31,9 @@ def test_failed_workflow_is_failing():
         open_pr_count=0,
         open_issue_count=0,
     )
-    assert result.score == 50
+    assert result.score == 75
     assert result.status == HealthStatus.FAILING
+    assert any("failure" in reason for reason in result.reasons)
 
 
 def test_running_workflow_is_running():
@@ -45,10 +47,11 @@ def test_running_workflow_is_running():
         open_pr_count=0,
         open_issue_count=0,
     )
+    assert result.score == 95
     assert result.status == HealthStatus.RUNNING
 
 
-def test_archived_inactive_repository_requires_attention():
+def test_archived_inactive_repository_is_explainable_attention():
     result = calculate_repository_health(
         archived=True,
         disabled=False,
@@ -59,12 +62,12 @@ def test_archived_inactive_repository_requires_attention():
         open_pr_count=30,
         open_issue_count=120,
     )
-    assert result.status == HealthStatus.FAILING
-    assert result.score == 20
-    assert len(result.reasons) >= 4
+    assert result.status == HealthStatus.ATTENTION
+    assert result.score == 64
+    assert len(result.reasons) >= 3
 
 
-def test_repository_without_ci_is_unknown_when_otherwise_active():
+def test_repository_without_ci_is_not_penalized_and_reports_coverage():
     result = calculate_repository_health(
         archived=False,
         disabled=False,
@@ -75,8 +78,10 @@ def test_repository_without_ci_is_unknown_when_otherwise_active():
         open_pr_count=0,
         open_issue_count=0,
     )
-    assert result.status == HealthStatus.UNKNOWN
-    assert result.score == 90
+    assert result.status == HealthStatus.HEALTHY
+    assert result.score == 100
+    assert result.coverage == 75
+    assert result.components["ci"]["evaluated"] is False
 
 
 def test_sync_error_requires_attention():
@@ -91,4 +96,22 @@ def test_sync_error_requires_attention():
         open_issue_count=0,
     )
     assert result.status == HealthStatus.ATTENTION
-    assert result.score == 65
+    assert result.score == 75
+
+
+def test_never_synchronized_repository_has_no_artificial_score():
+    result = calculate_repository_health(
+        archived=False,
+        disabled=False,
+        sync_error=None,
+        last_synced_at=None,
+        pushed_at=datetime.now(UTC),
+        latest_workflow_status=None,
+        latest_workflow_conclusion=None,
+        open_pr_count=0,
+        open_issue_count=0,
+    )
+    assert result.status == HealthStatus.UNKNOWN
+    assert result.score == 0
+    assert result.coverage == 0
+    assert result.reasons == ("Aguardando primeira sincronização detalhada",)
