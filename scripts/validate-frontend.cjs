@@ -53,14 +53,17 @@ for (const file of walk(sourceRoot).filter((item) =>
 
   if (file.endsWith('.vue')) {
     const scriptMatch = whole.match(/<script\s+setup\s+lang="ts">([\s\S]*?)<\/script>/)
-    const templateMatch = whole.match(/<template>([\s\S]*?)<\/template>/)
-    if (!scriptMatch || !templateMatch) {
+    const templateStart = whole.match(/<template(?:\s[^>]*)?>/)
+    if (!scriptMatch || !templateStart) {
       console.error(`${file}: componente Vue sem <script setup lang="ts"> ou <template>.`)
       failed = true
       continue
     }
     source = scriptMatch[1]
-    template = templateMatch[1]
+    // Não tente capturar o template com regex não-gulosa: componentes Vue podem
+    // conter <template v-if/v-else> aninhados. Remover apenas o bloco script
+    // deixa todo o template disponível para detectar componentes usados.
+    template = whole.replace(scriptMatch[0], '')
   }
 
   const output = ts.transpileModule(source, {
