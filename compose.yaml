@@ -2,7 +2,6 @@ name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
-  APP_VERSION: ${APP_VERSION:-0.3.0}
   APP_ENV: ${APP_ENV:-production}
   APP_DEBUG: ${APP_DEBUG:-false}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -28,7 +27,7 @@ x-app-environment: &app-environment
   NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
 
 x-api-service: &api-service
-  image: ${API_IMAGE:-argws-git-monitor-api}:${IMAGE_TAG:-local}
+  image: ${API_IMAGE:-argws-git-monitor-api}:latest
   build:
     context: ./backend
     dockerfile: Dockerfile
@@ -157,12 +156,11 @@ services:
         condition: service_healthy
 
   web:
-    image: ${WEB_IMAGE:-argws-git-monitor-web}:${IMAGE_TAG:-local}
+    image: ${WEB_IMAGE:-argws-git-monitor-web}:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_APP_VERSION: ${APP_VERSION:-0.3.0}
         VITE_API_BASE_URL: /api/v1
     restart: unless-stopped
     ports:
