@@ -39,6 +39,10 @@ if ($LASTEXITCODE -ne 0) {
     Fail "O Docker Desktop/Engine não está em execução."
 }
 
+foreach ($DirectoryName in @("data-postgres", "data-redis", "data-rabbitmq")) {
+    New-Item -ItemType Directory -Path (Join-Path $Root $DirectoryName) -Force | Out-Null
+}
+
 if (-not (Test-Path ".env")) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-env.ps1
     if ($LASTEXITCODE -ne 0) {
@@ -114,4 +118,5 @@ if (-not $Healthy) {
 Info "Instalação concluída"
 & docker compose @ComposeFiles ps
 Write-Host "`nAplicação: $PublicUrl" -ForegroundColor Green
-Write-Host "Credenciais: $Root\CREDENCIAIS_INICIAIS.txt`n"
+Write-Host "Credenciais: $Root\CREDENCIAIS_INICIAIS.txt"
+Write-Host "Persistência: $Root\data-postgres, $Root\data-redis e $Root\data-rabbitmq`n"

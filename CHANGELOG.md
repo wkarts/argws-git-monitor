@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.3 — 2026-08-20
+
+- substitui volumes Docker nomeados por bind mounts relativos em todas as stacks de produção;
+- persiste PostgreSQL em `./data-postgres:/var/lib/postgresql/data`;
+- persiste Redis em `./data-redis:/data`;
+- persiste RabbitMQ em `./data-rabbitmq:/var/lib/rabbitmq`;
+- remove os blocos superiores de volumes nomeados dos arquivos Compose;
+- garante que CloudPanel + Dockge, Dockge, Portainer, Docker GHCR, Docker local e os Composes de compatibilidade da raiz usem armazenamento dentro do diretório da própria stack;
+- atualiza geradores, instaladores e scripts de deploy para criar automaticamente as pastas `data-*`;
+- adiciona validação que rejeita caminhos absolutos, volumes nomeados e fontes sem o prefixo `./`;
+- adiciona migração segura dos volumes nomeados das versões anteriores, preservando os volumes originais para rollback;
+- interrompe atualizações automáticas quando encontra volumes antigos ainda não migrados, evitando iniciar uma base vazia;
+- adiciona as pastas persistentes ao `.gitignore` e atualiza a documentação operacional;
+- sincroniza a versão 0.2.3 no backend, frontend, imagens, ambientes e stacks.
+
 ## 0.2.2 — 2026-08-20
 
 - cria o diretório canônico `deploy/` com pacotes separados para CloudPanel, Dockge, Portainer e Docker Compose;

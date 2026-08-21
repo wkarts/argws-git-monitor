@@ -14,8 +14,10 @@ done
 [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "Porta inválida: $PORT" >&2; exit 2; }
 ENV_PATH="$ROOT/.env"
 CREDENTIALS_PATH="$ROOT/CREDENCIAIS_INICIAIS.txt"
+mkdir -p "$ROOT/data-postgres" "$ROOT/data-redis" "$ROOT/data-rabbitmq"
 if [[ -f "$ENV_PATH" && "$FORCE" != true ]]; then
   echo "$ENV_PATH já existe; nenhuma alteração realizada."
+  echo "Diretórios persistentes confirmados em $ROOT/data-*"
   exit 0
 fi
 command -v base64 >/dev/null 2>&1 || { echo "Comando base64 não encontrado." >&2; exit 1; }
@@ -39,7 +41,7 @@ URL="http://localhost:${PORT}"
 cat > "$ENV_PATH" <<EOF
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.2
+APP_VERSION=0.2.3
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -88,6 +90,8 @@ Senha:     ${RABBIT_PASSWORD}
 
 A aplicação exige a troca da senha administrativa no primeiro acesso.
 Este arquivo e o .env estão ignorados pelo Git.
+Dados persistentes: ./data-postgres, ./data-redis e ./data-rabbitmq.
 EOF
 chmod 600 "$ENV_PATH" "$CREDENTIALS_PATH" 2>/dev/null || true
 printf 'Segredos gerados em %s\nCredenciais gravadas em %s\n' "$ENV_PATH" "$CREDENTIALS_PATH"
+printf 'Dados persistentes em %s/data-postgres, %s/data-redis e %s/data-rabbitmq\n' "$ROOT" "$ROOT" "$ROOT"

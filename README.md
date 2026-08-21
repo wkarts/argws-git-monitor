@@ -4,19 +4,16 @@ Central operacional **mobile-first** para monitorar repositórios públicos e pr
 
 ## Recursos entregues
 
-- Dashboard operacional no padrão visual aprovado, com quatro indicadores, saúde segmentada, atividades recentes e tabela compacta.
-- Navegação própria para Repositórios, Pull Requests, Actions, Releases, Issues, Alertas e Configurações.
-- Experiência mobile-first com navegação inferior, painel “Mais” e alerta crítico de build.
-- Repositórios públicos e privados por token GitHub granular.
-- Último commit, branch principal, branches, issues, pull requests, releases e Actions.
-- Histórico de execuções, PRs e releases por repositório.
-- Reexecução completa, reexecução somente de jobs com falha e cancelamento de workflow.
+- Dashboard operacional no padrão visual aprovado.
+- Repositórios, Pull Requests, Actions, Releases, Issues, Alertas e Configurações.
+- Experiência mobile-first e PWA instalável.
+- Integração com repositórios públicos e privados do GitHub.
 - Sincronização automática, manual e por webhook.
-- PWA instalável em celular, tablet e desktop.
-- Interface responsiva, tema claro/escuro e comportamento offline.
-- Token GitHub criptografado no PostgreSQL e nunca devolvido ao navegador.
-- JWT de curta duração, refresh token rotativo/revogável, Argon2 e troca obrigatória da senha inicial.
-- Logs estruturados, health checks, métricas Prometheus, backup e restauração.
+- Reexecução e cancelamento de workflows conforme as permissões do token.
+- Token GitHub criptografado no PostgreSQL.
+- JWT, refresh rotativo, Argon2 e troca obrigatória da senha inicial.
+- Logs estruturados, health checks, métricas, backup e restauração.
+- Docker Compose com deploy separado para CloudPanel, Dockge, Portainer, GHCR e build local.
 
 ## Interface visual
 
@@ -26,14 +23,13 @@ A interface aprovada na versão 0.2.0 permanece como contrato visual da série 0
 
 ![Dashboard mobile](docs/previews/argws-git-monitor-dashboard-mobile-v0.2.0.png)
 
-Os critérios, rotas, componentes e larguras de aceitação estão documentados em `docs/CONTRATO_VISUAL.md`.
+Os critérios visuais estão em `docs/CONTRATO_VISUAL.md`.
 
 ## Deploys separados
 
-Os pacotes oficiais de implantação ficam em `deploy/`, separados por ambiente:
-
 ```text
 deploy/
+├── migrate-named-volumes.sh
 ├── cloudpanel/
 │   ├── README.md
 │   ├── nginx/argws-git-monitor.conf
@@ -66,19 +62,81 @@ deploy/
 | Ambiente | Diretório | Uso |
 |---|---|---|
 | CloudPanel + Dockge | `deploy/cloudpanel/` | Containers no Dockge e domínio/HTTPS no CloudPanel |
-| Dockge | `deploy/dockge/` | Stack pronta para o diretório ou editor do Dockge |
-| Portainer | `deploy/portainer/` | Stack sem `env_file`, preparada para variáveis do painel |
-| Docker Compose | `deploy/docker/` | Imagens GHCR ou build local por linha de comando |
+| Dockge | `deploy/dockge/` | Stack pronta para o diretório físico do Dockge |
+| Portainer | `deploy/portainer/` | Stack preparada para Web Editor ou repositório Git |
+| Docker Compose | `deploy/docker/` | Imagens GHCR ou build local |
 
-O índice completo está em `deploy/README.md`.
+## Armazenamento relativo à stack
+
+A partir da versão **0.2.3**, os dados persistentes não usam volumes nomeados nem diretórios absolutos do Linux. Todos os arquivos Compose utilizam fontes iniciadas por `./`:
+
+```yaml
+postgres:
+  volumes:
+    - ./data-postgres:/var/lib/postgresql/data
+
+redis:
+  volumes:
+    - ./data-redis:/data
+
+rabbitmq:
+  volumes:
+    - ./data-rabbitmq:/var/lib/rabbitmq
+```
+
+A estrutura física de cada stack fica assim:
+
+```text
+pasta-da-stack/
+├── compose.yaml
+├── .env
+├── data-postgres/
+├── data-redis/
+└── data-rabbitmq/
+```
+
+Consequências práticas:
+
+- os dados acompanham o diretório da stack;
+- o Dockge armazena os dados dentro do diretório físico daquela stack;
+- o Portainer resolve os caminhos dentro do diretório de trabalho da stack;
+- o CloudPanel continua apenas como reverse proxy e não recebe os dados;
+- `docker compose down` não remove as pastas `data-*`;
+- backup e auditoria física ficam mais simples.
+
+As pastas são criadas automaticamente pelos geradores e scripts de deploy.
+
+## Migração de volumes nomeados anteriores
+
+Instalações até a versão 0.2.2 devem migrar antes do primeiro deploy 0.2.3:
+
+```bash
+docker compose down
+bash deploy/migrate-named-volumes.sh --stack-dir /caminho/da/stack
+```
+
+O migrador:
+
+- identifica `${COMPOSE_PROJECT_NAME}_postgres_data`;
+- identifica `${COMPOSE_PROJECT_NAME}_redis_data`;
+- identifica `${COMPOSE_PROJECT_NAME}_rabbitmq_data`;
+- copia os arquivos para `./data-postgres`, `./data-redis` e `./data-rabbitmq`;
+- recusa sobrescrever diretórios não vazios;
+- preserva os volumes antigos para rollback.
+
+Na instalação pela raiz também existe o atalho:
+
+```bash
+make migrate-storage
+```
 
 ## Instalação direta
 
-Os instaladores da raiz continuam disponíveis por compatibilidade e usam as imagens prontas do GHCR por padrão. Caso o pull não esteja disponível, realizam automaticamente o build local com o código-fonte.
+Os instaladores da raiz continuam disponíveis e criam as pastas relativas automaticamente.
 
 ### Windows
 
-1. Extraia o pacote da GitHub Release.
+1. Extraia a GitHub Release.
 2. Abra o Docker Desktop.
 3. Execute `INSTALAR_WINDOWS.bat`.
 4. Acesse `http://localhost:8080`.
@@ -109,9 +167,7 @@ bash generate-env.sh
 bash deploy-local.sh
 ```
 
-O build local usa os contextos `../../backend` e `../../frontend`; portanto, deve ser executado dentro do repositório completo.
-
-## Dockge separado
+## Dockge
 
 ```bash
 cd deploy/dockge
@@ -119,7 +175,7 @@ bash generate-env.sh --url https://git.seu-dominio.com.br --bind 127.0.0.1
 bash deploy.sh
 ```
 
-O mesmo `compose.yaml` pode ser colado diretamente no editor do Dockge.
+Copie o conteúdo completo dessa pasta para o diretório de armazenamento de stacks do Dockge. Os diretórios `data-*` serão criados no mesmo local.
 
 ## CloudPanel junto com Dockge
 
@@ -129,15 +185,15 @@ bash generate-env.sh --url https://git.seu-dominio.com.br
 bash deploy.sh
 ```
 
-Depois, aplique o reverse proxy disponível em:
+Depois, aplique:
 
 ```text
 deploy/cloudpanel/nginx/argws-git-monitor.conf
 ```
 
-A stack CloudPanel mantém a aplicação vinculada a `127.0.0.1:8080`; o domínio e o TLS ficam sob responsabilidade do Nginx administrado pelo CloudPanel.
+A Web fica em `127.0.0.1:8080`, enquanto domínio e TLS são administrados pelo CloudPanel.
 
-## Portainer separado
+## Portainer
 
 Use:
 
@@ -146,41 +202,39 @@ deploy/portainer/compose.yaml
 deploy/portainer/stack.env.example
 ```
 
-Para gerar variáveis seguras:
+Para gerar as variáveis:
 
 ```bash
 cd deploy/portainer
 bash generate-stack-env.sh --url https://git.seu-dominio.com.br --bind 127.0.0.1
 ```
 
-Importe o conteúdo de `stack.env` na seção **Environment variables** do Portainer.
+Importe `stack.env` em **Environment variables**.
 
 ## Imagens Docker
 
-Imagens publicadas pelo workflow `Release e GHCR`:
-
 ```text
-ghcr.io/wkarts/argws-git-monitor-api
-ghcr.io/wkarts/argws-git-monitor-web
+ghcr.io/wkarts/argws-git-monitor-api:0.2.3
+ghcr.io/wkarts/argws-git-monitor-web:0.2.3
 ```
 
-Tags produzidas para esta versão:
+Tags publicadas:
 
 ```text
 latest
 sha-<commit>
-0.2.2
+0.2.3
 0.2
 ```
 
-Exemplo de pull versionado:
+Pull versionado:
 
 ```bash
-docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.2
-docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.2
+docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.3
+docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.3
 ```
 
-Pacotes GHCR privados exigem autenticação antes do pull:
+Pacotes privados:
 
 ```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin
@@ -188,15 +242,15 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin
 
 ## Primeiro acesso e GitHub
 
-1. Entre com as credenciais geradas no pacote.
+1. Entre com as credenciais geradas.
 2. Troque a senha administrativa.
 3. Abra **Configurações > Nova conexão**.
-4. Cadastre um token fine-grained do GitHub.
-5. Importe todos os repositórios autorizados ou selecione-os manualmente.
+4. Cadastre um token fine-grained.
+5. Importe os repositórios autorizados.
 
 Permissões recomendadas:
 
-| Permissão de repositório | Somente monitorar | Operar Actions/webhooks |
+| Permissão | Monitoramento | Operação |
 |---|---:|---:|
 | Metadata | leitura | leitura |
 | Contents | leitura | leitura |
@@ -209,22 +263,22 @@ Permissões recomendadas:
 
 | Serviço | Papel |
 |---|---|
-| `web` | Vue 3 PWA servida por Nginx e proxy reverso da API |
+| `web` | Vue 3 PWA e proxy Nginx da API |
 | `api` | FastAPI e OpenAPI |
-| `worker` | Celery para sincronizações e processamento assíncrono |
-| `beat` | Agendador periódico do Celery |
-| `migrate` | Alembic e bootstrap idempotente |
+| `worker` | Celery |
+| `beat` | Agendador Celery |
+| `migrate` | Alembic e bootstrap |
 | `postgres` | Persistência principal |
-| `redis` | Resultados e cache operacional |
+| `redis` | Cache e resultados |
 | `rabbitmq` | Broker das filas |
 
-Portas locais:
+Portas:
 
-- Aplicação: `8080`.
-- RabbitMQ Management: `127.0.0.1:15672`.
+- aplicação: `8080`;
+- RabbitMQ Management: `127.0.0.1:15672`;
 - PostgreSQL, Redis e AMQP não são publicados no host.
 
-## Comandos operacionais
+## Operação
 
 ```bash
 ./scripts/start.sh
@@ -236,7 +290,7 @@ Portas locais:
 ./scripts/update.sh
 ```
 
-Atalhos adicionais:
+Atalhos:
 
 ```bash
 make validate
@@ -244,11 +298,12 @@ make validate-deploys
 make deploy-ghcr
 make deploy-local
 make deploy-dockge
+make migrate-storage
 ```
 
-## CI/CD e versionamento
+## CI/CD
 
-A versão deve permanecer idêntica em:
+A versão deve coincidir em:
 
 ```text
 VERSION
@@ -256,19 +311,17 @@ backend/pyproject.toml
 frontend/package.json
 ```
 
-Ao receber um push na `main`, o workflow:
+O pipeline:
 
-1. valida backend, frontend, pacote e todos os diretórios de deploy;
-2. valida os arquivos Compose de Docker, Dockge, Portainer e CloudPanel;
-3. constrói as imagens API e Web para `linux/amd64` e `linux/arm64`;
-4. publica e inspeciona os manifests no GHCR;
-5. atualiza as tags `latest` e `sha-*`;
-6. quando a tag Git da versão ainda não existe, cria `v<versão>`;
-7. publica a GitHub Release com ZIP, TAR.GZ e `SHA256SUMS.txt`.
+1. valida backend, frontend, pacote e deploys;
+2. exige bind mounts relativos em todos os Compose de produção;
+3. rejeita volumes nomeados para PostgreSQL, Redis e RabbitMQ;
+4. constrói API e Web para `linux/amd64` e `linux/arm64`;
+5. publica e inspeciona os manifests no GHCR;
+6. cria a tag e a GitHub Release;
+7. publica o pacote completo e o pacote separado de deploys.
 
-Versão atual: **0.2.2**. Git tag da release: **v0.2.2**. A tag da imagem Docker é **0.2.2**, sem o prefixo `v`.
-
-Atualizações automáticas de versão do Dependabot permanecem desativadas para impedir a abertura massiva de PRs.
+Versão atual: **0.2.3**. Git tag: **v0.2.3**. Tag Docker: **0.2.3**.
 
 ## Documentação
 
@@ -283,7 +336,6 @@ Atualizações automáticas de versão do Dependabot permanecem desativadas para
 - `docs/SEGURANCA.md`
 - `docs/CONTRATO_VISUAL.md`
 - `docs/DEPLOY_CLOUDPANEL_DOCKGE.md`
-- `RELATORIO_VALIDACAO.md`
 
 ## Desenvolvimento
 
@@ -291,33 +343,7 @@ Atualizações automáticas de versão do Dependabot permanecem desativadas para
 docker compose -f compose.yaml -f compose.dev.yaml up -d --build
 ```
 
-Backend:
-
-```bash
-cd backend
-python -m venv .venv
-. .venv/bin/activate
-pip install -e '.[dev]'
-pytest
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm install
-npm run dev
-npm run build
-```
-
-Validação completa:
-
-```bash
-python scripts/validate-package.py
-python scripts/validate-deploy-layout.py
-node scripts/validate-frontend.cjs
-cd backend && pytest --cov=app --cov-fail-under=40
-```
+O volume `frontend_node_modules` do ambiente de desenvolvimento permanece efêmero e não contém dados de produção. A regra de armazenamento relativo é aplicada aos dados persistentes de PostgreSQL, Redis e RabbitMQ.
 
 ## Licença
 

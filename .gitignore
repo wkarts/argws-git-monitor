@@ -37,6 +37,12 @@ backups/*
 *.sql.gz
 *.log
 
+# Persistência Docker relativa a cada diretório de stack
+**/data-postgres/
+**/data-redis/
+**/data-rabbitmq/
+**/data-frontend-node-modules/
+
 # Pacotes gerados
 *.zip
 *.tar.gz

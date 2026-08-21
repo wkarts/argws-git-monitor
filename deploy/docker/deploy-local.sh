@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
+mkdir -p data-postgres data-redis data-rabbitmq
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker não encontrado." >&2
@@ -36,6 +37,7 @@ for _ in $(seq 1 90); do
   if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/v1/health/ready" >/dev/null 2>&1; then
     docker compose --env-file .env -f compose.local.yaml ps
     echo "ARGWS Git Monitor disponível em http://127.0.0.1:${PORT}"
+    echo "Dados em $ROOT/data-postgres, $ROOT/data-redis e $ROOT/data-rabbitmq"
     exit 0
   fi
   sleep 2

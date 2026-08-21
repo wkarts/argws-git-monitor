@@ -58,8 +58,12 @@ jobs:
       - run: python scripts/validate-package.py
       - run: python scripts/validate-deploy-layout.py
       - run: cp .env.example .env
-      - run: docker compose config -q
-      - run: docker compose -f compose.dockge.yaml config -q
+      - name: Validar Compose da raiz
+        run: docker compose config -q
+      - name: Validar Compose de desenvolvimento
+        run: docker compose -f compose.yaml -f compose.dev.yaml config -q
+      - name: Validar Compose Dockge da raiz
+        run: docker compose -f compose.dockge.yaml config -q
       - name: Validar Compose Docker GHCR
         run: docker compose --env-file deploy/docker/.env.example -f deploy/docker/compose.ghcr.yaml config -q
       - name: Validar Compose Docker local

@@ -6,6 +6,7 @@ Este diretório concentra os arquivos de implantação separados por ambiente. C
 
 ```text
 deploy/
+├── migrate-named-volumes.sh
 ├── cloudpanel/
 │   ├── README.md
 │   ├── nginx/
@@ -40,16 +41,55 @@ deploy/
 
 | Ambiente | Diretório | Finalidade |
 |---|---|---|
-| CloudPanel + Dockge | `deploy/cloudpanel/` | Aplicação em containers administrados pelo Dockge e publicada por reverse proxy HTTPS no CloudPanel |
-| Dockge | `deploy/dockge/` | Stack pronta para colar ou importar diretamente no Dockge |
-| Portainer | `deploy/portainer/` | Stack compatível com Portainer, usando variáveis do próprio painel |
-| Docker Compose | `deploy/docker/` | Execução por linha de comando, tanto por imagens GHCR quanto por build local |
+| CloudPanel + Dockge | `deploy/cloudpanel/` | Containers no Dockge e domínio/HTTPS por reverse proxy no CloudPanel |
+| Dockge | `deploy/dockge/` | Stack pronta para copiar ao diretório físico de stacks |
+| Portainer | `deploy/portainer/` | Stack compatível com Web Editor ou repositório Git |
+| Docker Compose | `deploy/docker/` | Execução por GHCR ou build local |
+
+## Persistência obrigatoriamente relativa
+
+Os bancos e filas não usam volumes nomeados nem caminhos absolutos do Linux. Cada `compose.yaml` grava dentro do próprio diretório da stack:
+
+```yaml
+postgres:
+  volumes:
+    - ./data-postgres:/var/lib/postgresql/data
+
+redis:
+  volumes:
+    - ./data-redis:/data
+
+rabbitmq:
+  volumes:
+    - ./data-rabbitmq:/var/lib/rabbitmq
+```
+
+A estrutura criada ao lado do Compose é:
+
+```text
+./data-postgres/
+./data-redis/
+./data-rabbitmq/
+```
+
+Assim, ao copiar, mover ou fazer backup do diretório da stack, os dados persistentes permanecem agrupados com ela. Os geradores e scripts de deploy criam essas pastas automaticamente.
+
+## Migração da versão anterior
+
+As versões anteriores usavam volumes Docker nomeados. Antes de atualizar uma instalação que já possui dados:
+
+```bash
+docker compose down
+bash deploy/migrate-named-volumes.sh --stack-dir /caminho/da/stack
+```
+
+O script copia os dados para `./data-*` e preserva os volumes antigos para rollback. Ele não sobrescreve diretórios que já contenham arquivos.
 
 ## Imagens oficiais
 
 ```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.2
-ghcr.io/wkarts/argws-git-monitor-web:0.2.2
+ghcr.io/wkarts/argws-git-monitor-api:0.2.3
+ghcr.io/wkarts/argws-git-monitor-web:0.2.3
 ```
 
 Também são publicadas as tags `latest`, `0.2` e `sha-<commit>`.
@@ -57,9 +97,10 @@ Também são publicadas as tags `latest`, `0.2` e `sha-<commit>`.
 ## Requisitos comuns
 
 - Docker Engine ou Docker Desktop com Docker Compose v2;
-- acesso ao GHCR ou código-fonte disponível para build local;
-- uma porta livre para a aplicação, por padrão `8080`;
-- domínio e HTTPS para uso público e webhooks do GitHub;
-- credenciais e segredos gerados antes do primeiro deploy.
+- acesso ao GHCR ou código-fonte para build local;
+- uma porta livre, por padrão `8080`;
+- domínio e HTTPS para acesso público e webhooks;
+- segredos gerados antes do primeiro deploy;
+- backup externo periódico de todo o diretório da stack.
 
-Nenhum arquivo `.env` real, senha, token ou credencial deve ser enviado ao GitHub.
+Nenhum `.env`, senha, token, credencial ou conteúdo das pastas `data-*` deve ser enviado ao GitHub.

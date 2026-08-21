@@ -17,8 +17,17 @@ def main() -> None:
     args = parser.parse_args()
     env_path = ROOT / ".env"
     credentials_path = ROOT / "CREDENCIAIS_INICIAIS.txt"
+    data_directories = [
+        ROOT / "data-postgres",
+        ROOT / "data-redis",
+        ROOT / "data-rabbitmq",
+    ]
+    for directory in data_directories:
+        directory.mkdir(parents=True, exist_ok=True)
+
     if env_path.exists() and not args.force:
         print(f"{env_path} já existe; nenhuma alteração realizada.")
+        print(f"Diretórios persistentes confirmados em {ROOT / 'data-*'}")
         return
 
     admin_password = secrets.token_urlsafe(18)
@@ -33,7 +42,7 @@ def main() -> None:
     env_path.write_text(
         f"""COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.2
+APP_VERSION=0.2.3
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -77,6 +86,7 @@ Senha: {admin_password}
 RabbitMQ: http://localhost:15672
 Usuário RabbitMQ: gitmonitor
 Senha RabbitMQ: {rabbit_password}
+Dados persistentes: ./data-postgres, ./data-redis e ./data-rabbitmq.
 """,
         encoding="utf-8",
     )
@@ -85,6 +95,9 @@ Senha RabbitMQ: {rabbit_password}
         os.chmod(credentials_path, 0o600)
     print(f"Segredos gerados em {env_path}")
     print(f"Credenciais gravadas em {credentials_path}")
+    print("Dados persistentes:")
+    for directory in data_directories:
+        print(f"- {directory}")
 
 
 if __name__ == "__main__":

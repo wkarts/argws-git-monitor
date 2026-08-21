@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+DEV_COMPOSE = ROOT / "compose.dev.yaml"
 EXPECTED_SERVICES = {
     "postgres",
     "redis",
@@ -20,6 +21,8 @@ EXPECTED_SERVICES = {
 }
 
 COMPOSE_FILES = {
+    "root-local": ROOT / "compose.yaml",
+    "root-dockge": ROOT / "compose.dockge.yaml",
     "docker-ghcr": ROOT / "deploy/docker/compose.ghcr.yaml",
     "docker-local": ROOT / "deploy/docker/compose.local.yaml",
     "dockge": ROOT / "deploy/dockge/compose.yaml",
@@ -29,6 +32,7 @@ COMPOSE_FILES = {
 
 REQUIRED_FILES = [
     ROOT / "deploy/README.md",
+    ROOT / "deploy/migrate-named-volumes.sh",
     ROOT / "deploy/docker/README.md",
     ROOT / "deploy/docker/.env.example",
     ROOT / "deploy/docker/generate-env.sh",
@@ -46,8 +50,15 @@ REQUIRED_FILES = [
     ROOT / "deploy/cloudpanel/dockge/.env.example",
     ROOT / "deploy/cloudpanel/dockge/generate-env.sh",
     ROOT / "deploy/cloudpanel/dockge/deploy.sh",
+    DEV_COMPOSE,
     *COMPOSE_FILES.values(),
 ]
+
+EXPECTED_STORAGE = {
+    "postgres": ("./data-postgres", "/var/lib/postgresql/data"),
+    "redis": ("./data-redis", "/data"),
+    "rabbitmq": ("./data-rabbitmq", "/var/lib/rabbitmq"),
+}
 
 
 def fail(message: str) -> None:
@@ -84,6 +95,80 @@ def validate_services(name: str, data: dict[str, Any]) -> None:
     if missing:
         fail(f"{name}: serviços ausentes: {', '.join(sorted(missing))}")
     ok(f"{name}: oito serviços obrigatórios encontrados")
+
+
+def parse_short_mount(name: str, service_name: str, mount: str) -> tuple[str, str]:
+    parts = mount.split(":")
+    if len(parts) < 2:
+        fail(f"{name}: volume inválido em {service_name}: {mount}")
+    return parts[0], parts[1]
+
+
+def find_mount(name: str, service_name: str, service: dict[str, Any]) -> tuple[str, str]:
+    volumes = service.get("volumes", [])
+    if not isinstance(volumes, list):
+        fail(f"{name}: volumes de {service_name} não formam uma lista")
+
+    _expected_source, expected_target = EXPECTED_STORAGE[service_name]
+    for mount in volumes:
+        if isinstance(mount, str):
+            source, target = parse_short_mount(name, service_name, mount)
+        elif isinstance(mount, dict):
+            source = str(mount.get("source", ""))
+            target = str(mount.get("target", ""))
+        else:
+            continue
+        if target == expected_target:
+            return source, target
+
+    fail(f"{name}: destino persistente {expected_target} ausente em {service_name}")
+
+
+def validate_relative_storage(name: str, data: dict[str, Any]) -> None:
+    services = data["services"]
+    for service_name, (expected_source, expected_target) in EXPECTED_STORAGE.items():
+        service = services.get(service_name)
+        if not isinstance(service, dict):
+            fail(f"{name}: serviço persistente {service_name} inválido")
+        source, target = find_mount(name, service_name, service)
+        if source != expected_source:
+            fail(
+                f"{name}: {service_name} deve usar {expected_source}:{expected_target}, "
+                f"encontrado {source}:{target}"
+            )
+        if not source.startswith("./"):
+            fail(f"{name}: fonte de {service_name} não começa com ./")
+        if Path(source).is_absolute():
+            fail(f"{name}: fonte absoluta não permitida em {service_name}: {source}")
+
+    named_volumes = data.get("volumes")
+    if named_volumes:
+        fail(f"{name}: bloco de volumes nomeados não é permitido para dados persistentes")
+
+    ok(
+        f"{name}: persistência relativa validada em "
+        "./data-postgres, ./data-redis e ./data-rabbitmq"
+    )
+
+
+def validate_dev_storage() -> None:
+    data = read_yaml(DEV_COMPOSE)
+    if data.get("volumes"):
+        fail("compose.dev.yaml: bloco de volumes nomeados não é permitido")
+
+    services = data.get("services")
+    if not isinstance(services, dict):
+        fail("compose.dev.yaml: bloco services ausente")
+    web = services.get("web")
+    if not isinstance(web, dict):
+        fail("compose.dev.yaml: serviço web ausente")
+    volumes = web.get("volumes", [])
+    if "./data-frontend-node-modules:/app/node_modules" not in volumes:
+        fail(
+            "compose.dev.yaml: node_modules deve usar "
+            "./data-frontend-node-modules:/app/node_modules"
+        )
+    ok("compose.dev.yaml: volume de desenvolvimento também usa caminho relativo")
 
 
 def validate_image_mode(name: str, data: dict[str, Any]) -> None:
@@ -139,6 +224,25 @@ def validate_portainer(data: dict[str, Any]) -> None:
     ok("portainer: variáveis independentes de env_file validadas")
 
 
+def validate_migration_script() -> None:
+    content = (ROOT / "deploy/migrate-named-volumes.sh").read_text(encoding="utf-8")
+    markers = [
+        "_postgres_data",
+        "_redis_data",
+        "_rabbitmq_data",
+        "data-postgres",
+        "data-redis",
+        "data-rabbitmq",
+        "/source:ro",
+    ]
+    missing = [marker for marker in markers if marker not in content]
+    if missing:
+        fail("migrador incompleto; marcadores ausentes: " + ", ".join(missing))
+    if "docker volume rm" in content:
+        fail("migrador não pode remover automaticamente os volumes antigos")
+    ok("migrador copia os dados e preserva os volumes antigos")
+
+
 def validate_versions() -> None:
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     for path in [
@@ -161,7 +265,10 @@ def main() -> int:
     loaded = {name: read_yaml(path) for name, path in COMPOSE_FILES.items()}
     for name, data in loaded.items():
         validate_services(name, data)
+        validate_relative_storage(name, data)
 
+    validate_dev_storage()
+    validate_image_mode("root-dockge", loaded["root-dockge"])
     validate_image_mode("docker-ghcr", loaded["docker-ghcr"])
     validate_image_mode("dockge", loaded["dockge"])
     validate_image_mode("portainer", loaded["portainer"])
@@ -169,9 +276,10 @@ def main() -> int:
     validate_local_build(loaded["docker-local"])
     validate_cloudpanel(loaded["cloudpanel-dockge"])
     validate_portainer(loaded["portainer"])
+    validate_migration_script()
     validate_versions()
 
-    print("[OK] Estrutura de deploy validada integralmente")
+    print("[OK] Estrutura de deploy e armazenamento relativo validados integralmente")
     return 0
 
 

@@ -11,9 +11,30 @@ generate-env.sh
 deploy.sh
 ```
 
-## Instalação pelo diretório de stacks
+## Persistência dentro da stack
 
-No servidor onde o Dockge está instalado:
+Quando esta pasta é copiada para o diretório de stacks do Dockge, os dados ficam dentro da própria pasta física da stack:
+
+```text
+argws-git-monitor/
+├── compose.yaml
+├── .env
+├── data-postgres/
+├── data-redis/
+└── data-rabbitmq/
+```
+
+O Compose utiliza exclusivamente:
+
+```yaml
+- ./data-postgres:/var/lib/postgresql/data
+- ./data-redis:/data
+- ./data-rabbitmq:/var/lib/rabbitmq
+```
+
+Não há volume nomeado nem caminho absoluto do Linux para os dados da aplicação.
+
+## Instalação pelo diretório de stacks
 
 ```bash
 cd /caminho/das/stacks
@@ -28,17 +49,29 @@ Depois, abra o Dockge e selecione a stack `argws-git-monitor`.
 
 ## Instalação pela interface
 
-1. Crie uma nova stack com o nome `argws-git-monitor`.
-2. Cole o conteúdo de `compose.yaml` no editor.
-3. Gere o arquivo `.env` no diretório físico da stack usando `generate-env.sh`, ou cadastre as variáveis no editor do Dockge.
-4. Execute **Pull** e depois **Deploy**.
-5. Aguarde o serviço `migrate` terminar com código zero.
-6. Confirme que `postgres`, `redis`, `rabbitmq`, `api` e `web` estão saudáveis.
+1. Crie uma stack chamada `argws-git-monitor`.
+2. Cole o conteúdo de `compose.yaml`.
+3. Coloque o `.env` no diretório físico da stack ou cadastre as variáveis no Dockge.
+4. Confirme que as fontes dos volumes começam com `./data-`.
+5. Execute **Pull** e **Deploy**.
+6. Aguarde `migrate` terminar com código zero.
+7. Confirme os serviços saudáveis.
 
-## Atualização
+## Atualização de versões anteriores
+
+Antes de atualizar uma stack que ainda usa volumes nomeados:
 
 ```bash
-cd deploy/dockge
+docker compose --env-file .env -f compose.yaml down
+bash ../migrate-named-volumes.sh --stack-dir "$PWD"
+bash deploy.sh
+```
+
+Quando o script comum não estiver no diretório pai, execute-o a partir do pacote da release informando `--stack-dir` com o caminho físico desta stack.
+
+## Atualização normal
+
+```bash
 docker compose --env-file .env -f compose.yaml pull
 docker compose --env-file .env -f compose.yaml up -d --no-build --remove-orphans
 ```
@@ -53,18 +86,10 @@ curl -fsS http://127.0.0.1:8080/api/v1/health/ready
 
 ## GHCR privado
 
-Quando o pacote estiver privado, autentique o host antes do deploy:
-
 ```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin
 ```
 
 ## Uso com CloudPanel
 
-Para publicar a aplicação por domínio e HTTPS no CloudPanel, utilize o pacote específico em:
-
-```text
-deploy/cloudpanel/
-```
-
-Nessa modalidade, a porta da aplicação fica vinculada a `127.0.0.1` e o CloudPanel atua como reverse proxy.
+Para publicar a aplicação por domínio e HTTPS no CloudPanel, utilize `deploy/cloudpanel/`. Nessa modalidade, a porta Web permanece em `127.0.0.1` e o CloudPanel atua como reverse proxy.
