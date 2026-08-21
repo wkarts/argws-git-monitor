@@ -17,10 +17,13 @@ class DashboardStats(BaseModel):
     attention: int
     failing: int
     unknown: int
+    health_evaluated: int
+    health_pending: int
+    average_health_score: int
+    average_health_coverage: int
     open_pull_requests: int
     open_issues: int
     unread_notifications: int
-    average_health_score: int
 
 
 class DashboardWorkflow(WorkflowRunRead):
