@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$(tr -d '\r\n' < "$ROOT/VERSION")"
 FORCE=false
 PORT=8080
 while [[ $# -gt 0 ]]; do
@@ -41,7 +42,7 @@ URL="http://localhost:${PORT}"
 cat > "$ENV_PATH" <<EOF
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.3
+APP_VERSION=${VERSION}
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
