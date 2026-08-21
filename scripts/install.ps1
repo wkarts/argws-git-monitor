@@ -39,7 +39,20 @@ if ($LASTEXITCODE -ne 0) {
     Fail "O Docker Desktop/Engine não está em execução."
 }
 
-foreach ($DirectoryName in @("data-postgres", "data-redis", "data-rabbitmq")) {
+$DataDirectories = @(
+    "data-postgres",
+    "data-redis",
+    "data-rabbitmq",
+    "data-logs\api",
+    "data-logs\worker",
+    "data-logs\beat",
+    "data-logs\migrate",
+    "data-logs\web",
+    "data-logs\postgres",
+    "data-logs\redis",
+    "data-logs\rabbitmq"
+)
+foreach ($DirectoryName in $DataDirectories) {
     New-Item -ItemType Directory -Path (Join-Path $Root $DirectoryName) -Force | Out-Null
 }
 
@@ -121,4 +134,4 @@ Write-Host "`nAplicação: $PublicUrl" -ForegroundColor Green
 Write-Host "Imagens: :latest"
 Write-Host "Versão: lida do próprio aplicativo"
 Write-Host "Credenciais: $Root\CREDENCIAIS_INICIAIS.txt"
-Write-Host "Persistência: $Root\data-postgres, $Root\data-redis e $Root\data-rabbitmq`n"
+Write-Host "Persistência: $Root\data-postgres, $Root\data-redis, $Root\data-rabbitmq e $Root\data-logs`n"
