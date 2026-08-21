@@ -4,6 +4,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$Version = (Get-Content (Join-Path $Root "VERSION") -Raw).Trim()
 $EnvPath = Join-Path $Root ".env"
 $CredentialsPath = Join-Path $Root "CREDENCIAIS_INICIAIS.txt"
 $DataDirectories = @(
@@ -47,7 +48,7 @@ $Url = "http://localhost:$Port"
 $EnvContent = @"
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.3
+APP_VERSION=$Version
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
