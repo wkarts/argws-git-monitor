@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDPrimaryKeyMixin
@@ -20,6 +20,14 @@ class NotificationSeverity(str, enum.Enum):
     SUCCESS = "success"
     WARNING = "warning"
     ERROR = "error"
+
+
+class SyncJobStatus(str, enum.Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class Notification(UUIDPrimaryKeyMixin, Base):
@@ -43,6 +51,41 @@ class Notification(UUIDPrimaryKeyMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="notifications")
     repository: Mapped[Repository | None] = relationship(back_populates="notifications")
+
+
+class SyncJob(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "sync_jobs"
+    __table_args__ = (
+        Index("ix_sync_jobs_user_created", "user_id", "created_at"),
+        Index("ix_sync_jobs_status_created", "status", "created_at"),
+        Index("ix_sync_jobs_celery_task", "celery_task_id"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("github_connections.id", ondelete="SET NULL"), index=True
+    )
+    repository_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("repositories.id", ondelete="SET NULL"), index=True
+    )
+    celery_task_id: Mapped[str | None] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(80), nullable=False)
+    label: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[SyncJobStatus] = mapped_column(
+        String(30), default=SyncJobStatus.QUEUED, nullable=False
+    )
+    progress_current: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    progress_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="sync_jobs")
 
 
 class WebhookDelivery(UUIDPrimaryKeyMixin, Base):
