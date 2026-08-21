@@ -67,7 +67,9 @@ class Settings(BaseSettings):
     github_repository_limit: int = 300
     github_request_timeout_seconds: float = 30.0
     github_concurrency: int = 5
-    sync_interval_seconds: int = 300
+    # Full sync é reconciliação; atualizações imediatas devem vir por webhook.
+    # 1h mantém 300 repositórios confortavelmente abaixo do rate limit REST.
+    sync_interval_seconds: int = 3600
 
     demo_data_enabled: bool = True
     notification_retention_days: int = 90
