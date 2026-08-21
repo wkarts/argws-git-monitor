@@ -63,19 +63,19 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($InstallSource -eq "local") {
-    Info "Construindo as imagens localmente"
-    & docker compose @ComposeFiles up -d --build --remove-orphans
+    Info "Construindo as imagens locais :latest"
+    & docker compose @ComposeFiles up -d --build --force-recreate --remove-orphans
     if ($LASTEXITCODE -ne 0) {
         Fail "Falha ao construir ou iniciar a stack."
     }
 }
 else {
-    Info "Baixando as imagens oficiais do GHCR"
+    Info "Baixando as imagens oficiais :latest do GHCR"
     & docker compose @ComposeFiles pull
 
     if ($LASTEXITCODE -eq 0) {
-        Info "Iniciando a stack com as imagens publicadas"
-        & docker compose @ComposeFiles up -d --no-build --remove-orphans
+        Info "Iniciando a stack com o digest mais recente"
+        & docker compose @ComposeFiles up -d --no-build --force-recreate --remove-orphans
         if ($LASTEXITCODE -ne 0) {
             Fail "Falha ao iniciar a stack com as imagens do GHCR."
         }
@@ -83,7 +83,7 @@ else {
     else {
         Warning "Não foi possível baixar uma ou mais imagens do GHCR. Será realizado o build local como contingência."
         $ComposeFiles = @("-f", "compose.yaml")
-        & docker compose @ComposeFiles up -d --build --remove-orphans
+        & docker compose @ComposeFiles up -d --build --force-recreate --remove-orphans
         if ($LASTEXITCODE -ne 0) {
             Fail "Falha ao iniciar a stack."
         }
@@ -118,5 +118,7 @@ if (-not $Healthy) {
 Info "Instalação concluída"
 & docker compose @ComposeFiles ps
 Write-Host "`nAplicação: $PublicUrl" -ForegroundColor Green
+Write-Host "Imagens: :latest"
+Write-Host "Versão: lida do próprio aplicativo"
 Write-Host "Credenciais: $Root\CREDENCIAIS_INICIAIS.txt"
 Write-Host "Persistência: $Root\data-postgres, $Root\data-redis e $Root\data-rabbitmq`n"
