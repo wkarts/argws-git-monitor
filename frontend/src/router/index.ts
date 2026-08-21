@@ -21,7 +21,9 @@ const router = createRouter({
         { path: 'inactivity', name: 'inactivity', component: () => import('../views/InactivityPoliciesView.vue'), meta: { title: 'Automação por inatividade' } },
         { path: 'jobs', name: 'jobs', component: () => import('../views/QueueView.vue'), meta: { title: 'Fila operacional' } },
         { path: 'notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: 'Notificações' } },
+        { path: 'profile', name: 'profile', component: () => import('../views/ProfileView.vue'), meta: { title: 'Meu perfil' } },
         { path: 'users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: 'Usuários e segurança', requiresSuperuser: true } },
+        { path: 'logs', name: 'logs', component: () => import('../views/LogsView.vue'), meta: { title: 'Central de logs', requiresSuperuser: true } },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: 'Configurações' } }
       ]
     },
