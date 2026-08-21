@@ -19,6 +19,7 @@ from app.api.routes import (
     github_tools,
     inactivity,
     jobs,
+    logs,
     notifications,
     operations,
     repositories,
@@ -112,6 +113,7 @@ async def metrics() -> Response:
 app.include_router(system.router, prefix=settings.api_v1_prefix)
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(admin.router, prefix=settings.api_v1_prefix)
+app.include_router(logs.router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
 app.include_router(github.router, prefix=settings.api_v1_prefix)
 app.include_router(github_tools.router, prefix=settings.api_v1_prefix)
