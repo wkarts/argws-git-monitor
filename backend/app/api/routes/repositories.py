@@ -32,6 +32,7 @@ from app.services.github_client import GitHubAPIError
 from app.services.github_mapping import apply_repository_base
 from app.services.github_sync import get_repository_client
 from app.services.job_queue import create_job
+from app.services.worker_status import require_worker
 from app.tasks.jobs import sync_repository_task
 
 router = APIRouter(prefix="/repositories", tags=["Repositórios"])
@@ -227,7 +228,9 @@ async def delete_from_github(
     full_name = repository.full_name
     await db.delete(repository)
     await db.commit()
-    return MessageResponse(message=f"{full_name} foi excluído definitivamente do GitHub e do monitor.")
+    return MessageResponse(
+        message=f"{full_name} foi excluído definitivamente do GitHub e do monitor."
+    )
 
 
 @router.post("/{repository_id}/sync", response_model=SyncAcceptedResponse)
@@ -237,6 +240,14 @@ async def sync_repository_now(
     db: DbSession,
 ) -> SyncAcceptedResponse:
     repository = await _owned_repository(db, repository_id, current_user.id)
+    try:
+        await require_worker()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Sincronização não enfileirada. {exc}",
+        ) from exc
+
     job = await create_job(
         db,
         user_id=current_user.id,
@@ -244,13 +255,14 @@ async def sync_repository_now(
         repository_id=repository.id,
         kind="repository.sync.manual",
         label=f"Sincronizar · {repository.full_name}",
+        progress_total=1,
     )
     await db.commit()
     task = sync_repository_task.delay(str(repository_id), str(job.id))
     job.celery_task_id = task.id
     await db.commit()
     return SyncAcceptedResponse(
-        message="Sincronização adicionada à fila visível.",
+        message="Sincronização enviada ao worker e registrada na fila.",
         task_id=task.id,
         job_id=job.id,
     )
