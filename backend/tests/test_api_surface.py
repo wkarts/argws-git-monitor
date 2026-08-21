@@ -51,6 +51,6 @@ async def test_api_root_reports_current_version() -> None:
     payload = await api_root()
 
     assert payload["name"] == "ARGWS Git Monitor"
-    assert payload["version"] == "0.3.0"
+    assert payload["version"] == "0.3.1"
     assert payload["status"] == "operational"
     assert payload["docs"] == "/api/v1/docs"
