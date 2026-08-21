@@ -44,12 +44,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function login(email: string, password: string): Promise<User> {
+  async function login(email: string, password: string, otpCode?: string): Promise<User> {
     busy.value = true
     try {
       const payload = await api.post<TokenPair>(
         '/auth/login',
-        { email, password },
+        {
+          email,
+          password,
+          ...(otpCode?.trim() ? { otp_code: otpCode.trim() } : {})
+        },
         { authenticated: false, retryOnUnauthorized: false }
       )
       session.value = tokenPairToSession(payload)
