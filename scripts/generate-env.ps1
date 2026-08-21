@@ -6,9 +6,19 @@ $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $EnvPath = Join-Path $Root ".env"
 $CredentialsPath = Join-Path $Root "CREDENCIAIS_INICIAIS.txt"
+$DataDirectories = @(
+    (Join-Path $Root "data-postgres"),
+    (Join-Path $Root "data-redis"),
+    (Join-Path $Root "data-rabbitmq")
+)
+
+foreach ($Directory in $DataDirectories) {
+    New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+}
 
 if ((Test-Path $EnvPath) -and -not $Force) {
     Write-Host "$EnvPath já existe; nenhuma alteração realizada."
+    Write-Host "Diretórios persistentes confirmados em $Root\data-*"
     exit 0
 }
 
@@ -37,7 +47,7 @@ $Url = "http://localhost:$Port"
 $EnvContent = @"
 COMPOSE_PROJECT_NAME=argws-git-monitor
 APP_NAME="ARGWS Git Monitor"
-APP_VERSION=0.2.2
+APP_VERSION=0.2.3
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
@@ -86,6 +96,7 @@ Senha:     $RabbitPassword
 
 A aplicação exige a troca da senha administrativa no primeiro acesso.
 Este arquivo e o .env estão ignorados pelo Git.
+Dados persistentes: .\data-postgres, .\data-redis e .\data-rabbitmq.
 "@
 
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -94,3 +105,4 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 Write-Host "Segredos gerados em $EnvPath" -ForegroundColor Green
 Write-Host "Credenciais gravadas em $CredentialsPath" -ForegroundColor Green
+Write-Host "Dados persistentes em $Root\data-postgres, $Root\data-redis e $Root\data-rabbitmq" -ForegroundColor Green

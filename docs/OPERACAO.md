@@ -11,6 +11,37 @@ deploy/docker/
 
 Consulte `deploy/README.md` para escolher a modalidade correta.
 
+## Armazenamento persistente
+
+A versão 0.2.3 mantém os dados dentro do diretório físico de cada stack. Os arquivos Compose utilizam apenas bind mounts relativos:
+
+```yaml
+postgres:
+  volumes:
+    - ./data-postgres:/var/lib/postgresql/data
+
+redis:
+  volumes:
+    - ./data-redis:/data
+
+rabbitmq:
+  volumes:
+    - ./data-rabbitmq:/var/lib/rabbitmq
+```
+
+Estrutura esperada:
+
+```text
+pasta-da-stack/
+├── compose.yaml
+├── .env
+├── data-postgres/
+├── data-redis/
+└── data-rabbitmq/
+```
+
+Não mova somente o `compose.yaml`: mova ou faça backup do diretório completo da stack.
+
 ## Estado da stack
 
 Na instalação pela raiz:
@@ -22,36 +53,30 @@ Na instalação pela raiz:
 Docker separado por GHCR:
 
 ```bash
-docker compose \
-  --env-file deploy/docker/.env \
-  -f deploy/docker/compose.ghcr.yaml \
-  ps
+cd deploy/docker
+docker compose --env-file .env -f compose.ghcr.yaml ps
 ```
 
 Dockge separado:
 
 ```bash
-docker compose \
-  --env-file deploy/dockge/.env \
-  -f deploy/dockge/compose.yaml \
-  ps
+cd deploy/dockge
+docker compose --env-file .env -f compose.yaml ps
 ```
 
 ## Logs
+
+Na raiz:
 
 ```bash
 ./scripts/logs.sh
 ```
 
-Consultas específicas:
+Em um pacote separado:
 
 ```bash
-docker compose logs -f --tail=200
-docker compose logs -f api worker beat
-docker compose logs migrate
+docker compose --env-file .env -f compose.yaml logs -f --tail=200
 ```
-
-Nos pacotes separados, sempre informe o Compose e o ambiente correspondentes.
 
 ## Reinício seguro
 
@@ -59,17 +84,51 @@ Nos pacotes separados, sempre informe o Compose e o ambiente correspondentes.
 docker compose restart api worker beat web
 ```
 
-## Atualização padrão pela raiz
+## Atualização pela raiz
 
 ```bash
 ./scripts/update.sh
 ```
 
-O script respeita `INSTALL_SOURCE` no `.env`:
+O script:
 
-- `ghcr`: baixa as imagens publicadas e inicia sem build;
-- `local`: atualiza o código e reconstrói as imagens;
-- se o pull do GHCR falhar, o modo `ghcr` usa build local como contingência.
+- cria `./data-postgres`, `./data-redis` e `./data-rabbitmq`;
+- verifica se ainda existem volumes nomeados antigos;
+- interrompe a atualização quando encontra dados antigos ainda não migrados;
+- usa GHCR ou build local conforme `INSTALL_SOURCE`.
+
+## Migração das versões 0.2.2 ou anteriores
+
+As versões anteriores utilizavam volumes Docker nomeados. Antes do primeiro deploy da 0.2.3:
+
+```bash
+docker compose down
+bash deploy/migrate-named-volumes.sh --stack-dir /caminho/da/stack
+```
+
+Com nome de projeto explícito:
+
+```bash
+bash deploy/migrate-named-volumes.sh \
+  --stack-dir /caminho/da/stack \
+  --project argws-git-monitor
+```
+
+O migrador:
+
+1. localiza os volumes `${COMPOSE_PROJECT_NAME}_postgres_data`, `${COMPOSE_PROJECT_NAME}_redis_data` e `${COMPOSE_PROJECT_NAME}_rabbitmq_data`;
+2. recusa a migração se algum volume estiver em uso;
+3. recusa sobrescrever uma pasta `data-*` não vazia;
+4. copia os dados para o diretório da stack;
+5. preserva os volumes anteriores para rollback.
+
+Na instalação pela raiz:
+
+```bash
+make migrate-storage
+```
+
+Depois de validar a aplicação e o backup, os volumes antigos podem ser removidos manualmente. Não os remova antes da validação.
 
 ## Atualização pelo pacote Docker GHCR
 
@@ -82,34 +141,32 @@ docker compose --env-file .env -f compose.ghcr.yaml up -d --no-build --remove-or
 ## Atualização pelo Dockge
 
 ```bash
-cd deploy/dockge
+cd /diretorio/fisico/da/stack/argws-git-monitor
 docker compose --env-file .env -f compose.yaml pull
 docker compose --env-file .env -f compose.yaml up -d --no-build --remove-orphans
 ```
 
 ## Imagens versionadas
 
-A tag das imagens não usa o prefixo `v`:
-
 ```text
-ghcr.io/wkarts/argws-git-monitor-api:0.2.2
-ghcr.io/wkarts/argws-git-monitor-web:0.2.2
+ghcr.io/wkarts/argws-git-monitor-api:0.2.3
+ghcr.io/wkarts/argws-git-monitor-web:0.2.3
 ```
 
 Pull manual:
 
 ```bash
-docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.2
-docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.2
+docker pull ghcr.io/wkarts/argws-git-monitor-api:0.2.3
+docker pull ghcr.io/wkarts/argws-git-monitor-web:0.2.3
 ```
 
-Se os pacotes estiverem privados:
+Pacotes privados:
 
 ```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u wkarts --password-stdin
 ```
 
-## Build local separado
+## Build local
 
 ```bash
 cd deploy/docker
@@ -117,21 +174,17 @@ bash generate-env.sh
 bash deploy-local.sh
 ```
 
-Ou manualmente:
-
-```bash
-docker compose --env-file .env -f compose.local.yaml up -d --build --remove-orphans
-```
-
 ## CloudPanel
 
-O pacote `deploy/cloudpanel/dockge/` mantém a aplicação em `127.0.0.1:8080`. O reverse proxy está em:
+O pacote `deploy/cloudpanel/dockge/` mantém a Web em `127.0.0.1:8080`. O reverse proxy está em:
 
 ```text
 deploy/cloudpanel/nginx/argws-git-monitor.conf
 ```
 
-Verificação local e pública:
+Os dados continuam na pasta física da stack Dockge, nunca no diretório do site do CloudPanel.
+
+Verificação:
 
 ```bash
 curl -fsS http://127.0.0.1:8080/api/v1/health/ready
@@ -140,37 +193,60 @@ curl -fsS https://git.seu-dominio.com.br/api/v1/health/ready
 
 ## Backup
 
+Backup lógico do PostgreSQL:
+
 ```bash
 ./scripts/backup.sh
 ```
 
-O arquivo `.dump` é criado em `backups/` com SHA-256. Copie o backup para armazenamento externo seguro.
+Backup físico da stack deve incluir, no mínimo:
 
-## Restauração
+```text
+.env
+compose.yaml
+data-postgres/
+data-redis/
+data-rabbitmq/
+backups/
+```
+
+Para um backup físico consistente em produção, pare os serviços que escrevem dados ou use snapshots consistentes do sistema de arquivos, além do dump lógico do PostgreSQL.
+
+## Restauração lógica
 
 ```bash
 ./scripts/restore.sh backups/argws-git-monitor_AAAAMMDD_HHMMSS.dump
 ```
 
-A restauração interrompe temporariamente API, worker, beat e web, preservando os containers de dados.
-
-## Remoção sem perder dados
+## Remoção dos containers sem apagar os dados
 
 ```bash
 docker compose down
 ```
 
-## Remoção completa, incluindo dados
+As pastas `./data-*` permanecem intactas.
+
+## Remoção de volumes Docker
 
 ```bash
 docker compose down -v
 ```
 
-O último comando elimina PostgreSQL, Redis e RabbitMQ de forma irreversível.
+Na versão 0.2.3, esse comando não apaga PostgreSQL, Redis ou RabbitMQ, porque eles são bind mounts relativos e não volumes nomeados.
+
+## Remoção física completa dos dados
+
+Somente depois de backup e confirmação explícita:
+
+```bash
+rm -rf ./data-postgres ./data-redis ./data-rabbitmq
+```
+
+Esse comando é irreversível.
 
 ## Endpoints de diagnóstico
 
 - `/api/v1/health/live`: processo da API;
 - `/api/v1/health/ready`: PostgreSQL e Redis;
 - `/api/v1/docs`: Swagger/OpenAPI;
-- `/metrics`: Prometheus, restrito à rede privada pelo Nginx.
+- `/metrics`: métricas Prometheus.

@@ -1,9 +1,10 @@
-.PHONY: install up down restart logs status test validate validate-deploys backup update publish clean deploy-ghcr deploy-local deploy-dockge
+.PHONY: install up down restart logs status test validate validate-deploys backup update publish clean deploy-ghcr deploy-local deploy-dockge migrate-storage
 
 install:
 	./scripts/install.sh
 
 up:
+	mkdir -p data-postgres data-redis data-rabbitmq
 	docker compose up -d --remove-orphans
 
 down:
@@ -36,6 +37,10 @@ deploy-local:
 
 deploy-dockge:
 	bash deploy/dockge/deploy.sh
+
+migrate-storage:
+	docker compose down
+	bash deploy/migrate-named-volumes.sh --stack-dir .
 
 backup:
 	./scripts/backup.sh

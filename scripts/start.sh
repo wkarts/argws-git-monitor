@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+mkdir -p data-postgres data-redis data-rabbitmq
 
 INSTALL_SOURCE="$(
   awk -F= '

@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
+mkdir -p data-postgres data-redis data-rabbitmq
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker não encontrado." >&2
@@ -21,3 +22,4 @@ docker compose --env-file .env -f compose.yaml config -q
 docker compose --env-file .env -f compose.yaml pull
 docker compose --env-file .env -f compose.yaml up -d --no-build --remove-orphans
 docker compose --env-file .env -f compose.yaml ps
+printf 'Dados persistentes em:\n- %s/data-postgres\n- %s/data-redis\n- %s/data-rabbitmq\n' "$ROOT" "$ROOT" "$ROOT"

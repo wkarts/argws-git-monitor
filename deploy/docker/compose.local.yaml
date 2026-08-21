@@ -2,7 +2,7 @@ name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
-  APP_VERSION: ${APP_VERSION:-0.2.2}
+  APP_VERSION: ${APP_VERSION:-0.2.3}
   APP_ENV: ${APP_ENV:-production}
   APP_DEBUG: ${APP_DEBUG:-false}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -48,7 +48,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-gitmonitor}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatória}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data-postgres:/var/lib/postgresql/data
     networks:
       - gitmonitor
     healthcheck:
@@ -65,7 +65,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
     volumes:
-      - redis_data:/data
+      - ./data-redis:/data
     networks:
       - gitmonitor
     healthcheck:
@@ -83,7 +83,7 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-gitmonitor}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS obrigatória}
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - ./data-rabbitmq:/var/lib/rabbitmq
     ports:
       - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     networks:
@@ -160,7 +160,7 @@ services:
       context: ../../frontend
       dockerfile: Dockerfile
       args:
-        VITE_APP_VERSION: ${APP_VERSION:-0.2.2}
+        VITE_APP_VERSION: ${APP_VERSION:-0.2.3}
         VITE_API_BASE_URL: /api/v1
     restart: unless-stopped
     ports:
@@ -177,11 +177,3 @@ networks:
   gitmonitor:
     name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}_network
     driver: bridge
-
-volumes:
-  postgres_data:
-    name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}_postgres_data
-  redis_data:
-    name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}_redis_data
-  rabbitmq_data:
-    name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}_rabbitmq_data
