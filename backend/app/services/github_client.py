@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
 from app.core.config import get_settings
 
 
@@ -28,6 +29,7 @@ class GitHubClient:
         self.rate_limit_reset_at: datetime | None = None
         self.oauth_scopes: list[str] = []
         self.accepted_permissions: str | None = None
+        self.optional_warnings: dict[str, str] = {}
         self._client = httpx.AsyncClient(
             base_url=self.api_url,
             timeout=httpx.Timeout(self.timeout),
@@ -140,6 +142,25 @@ class GitHubClient:
             await asyncio.sleep(0)
         return collected[:limit]
 
+    async def optional_paginate(
+        self,
+        resource: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        limit: int,
+        empty_statuses: set[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Consulta um subrecurso sem inutilizar todo o monitoramento se ele for opcional."""
+        try:
+            return await self.paginate(path, params=params, limit=limit)
+        except GitHubAPIError as exc:
+            allowed = empty_statuses or {403, 404}
+            if exc.status_code in allowed:
+                self.optional_warnings[resource] = str(exc)
+                return []
+            raise
+
     async def get_authenticated_user(self) -> dict[str, Any]:
         payload = await self.get_json("/user")
         if not isinstance(payload, dict):
@@ -221,27 +242,37 @@ class GitHubClient:
         await self.request("DELETE", f"/repos/{full_name}")
 
     async def list_commits(self, full_name: str, *, limit: int = 1) -> list[dict[str, Any]]:
-        return await self.paginate(f"/repos/{full_name}/commits", limit=limit)
+        return await self.optional_paginate(
+            "commits", f"/repos/{full_name}/commits", limit=limit, empty_statuses={403, 404, 409}
+        )
 
     async def list_branches(self, full_name: str, *, limit: int = 100) -> list[dict[str, Any]]:
-        return await self.paginate(f"/repos/{full_name}/branches", limit=limit)
+        return await self.optional_paginate(
+            "branches", f"/repos/{full_name}/branches", limit=limit, empty_statuses={403, 404, 409}
+        )
 
     async def list_workflow_runs(
         self, full_name: str, *, limit: int = 30
     ) -> list[dict[str, Any]]:
-        return await self.paginate(f"/repos/{full_name}/actions/runs", limit=limit)
+        return await self.optional_paginate(
+            "actions", f"/repos/{full_name}/actions/runs", limit=limit, empty_statuses={403, 404}
+        )
 
     async def list_pull_requests(
         self, full_name: str, *, limit: int = 100
     ) -> list[dict[str, Any]]:
-        return await self.paginate(
+        return await self.optional_paginate(
+            "pull_requests",
             f"/repos/{full_name}/pulls",
             params={"state": "open", "sort": "updated", "direction": "desc"},
             limit=limit,
+            empty_statuses={403, 404},
         )
 
     async def list_releases(self, full_name: str, *, limit: int = 20) -> list[dict[str, Any]]:
-        return await self.paginate(f"/repos/{full_name}/releases", limit=limit)
+        return await self.optional_paginate(
+            "releases", f"/repos/{full_name}/releases", limit=limit, empty_statuses={403, 404}
+        )
 
     async def rerun_failed_workflow(self, full_name: str, run_id: int) -> None:
         await self.request("POST", f"/repos/{full_name}/actions/runs/{run_id}/rerun-failed-jobs")
