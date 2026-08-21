@@ -73,6 +73,15 @@ class PackageDeleteRequest(BaseModel):
     confirmation: str = Field(min_length=1, max_length=500)
 
 
+class RepositoryComplianceProbeRequest(BaseModel):
+    full_name: str = Field(min_length=3, max_length=520)
+
+
+class RepositoryComplianceDeleteRequest(BaseModel):
+    full_name: str = Field(min_length=3, max_length=520)
+    confirmation: str = Field(min_length=1, max_length=600)
+
+
 class ToolResult(BaseModel):
     message: str
     data: dict[str, Any] = Field(default_factory=dict)

@@ -4,7 +4,7 @@ import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
   Activity, Bell, ChevronDown, ChevronLeft, ChevronRight, CircleDotDashed, FileText,
   Github, GitPullRequest, LayoutDashboard, ListChecks, LogOut, Menu, MoreHorizontal,
-  PlayCircle, Settings, Tag, UserRound, Users, Wrench, X
+  PlayCircle, Settings, ShieldAlert, Tag, UserRound, Users, Wrench, X
 } from 'lucide-vue-next'
 import AppLogo from '../components/AppLogo.vue'
 import { api } from '../services/api'
@@ -35,6 +35,7 @@ const navItems = computed(() => [
   { to: '/releases', label: 'Releases', icon: Tag },
   { to: '/issues', label: 'Issues', icon: CircleDotDashed },
   { to: '/github-tools', label: 'GitHub Tools', icon: Wrench },
+  { to: '/compliance', label: 'Conformidade', icon: ShieldAlert },
   { to: '/inactivity', label: 'Inatividade', icon: Activity },
   { to: '/jobs', label: 'Fila', icon: ListChecks, badge: queueActive.value },
   { to: '/notifications', label: 'Alertas', icon: Bell, badge: unreadNotifications.value },
@@ -202,6 +203,7 @@ onBeforeUnmount(() => {
         <RouterLink to="/releases"><Tag :size="19"/><span>Releases</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/issues"><CircleDotDashed :size="19"/><span>Issues</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/github-tools"><Wrench :size="19"/><span>GitHub Tools</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/compliance"><ShieldAlert :size="19"/><span>Conformidade</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/inactivity"><Activity :size="19"/><span>Inatividade</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/notifications"><Bell :size="19"/><span>Alertas</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/profile"><UserRound :size="19"/><span>Meu perfil</span><ChevronRight :size="16"/></RouterLink>
