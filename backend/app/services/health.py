@@ -15,6 +15,7 @@ FAILURE_CONCLUSIONS = {
     "stale",
 }
 RUNNING_STATUSES = {"queued", "requested", "waiting", "pending", "in_progress"}
+_UNSET = object()
 
 
 @dataclass(slots=True, frozen=True)
@@ -53,13 +54,14 @@ def calculate_repository_health(
     latest_workflow_conclusion: str | None,
     open_pr_count: int,
     open_issue_count: int,
-    last_synced_at: datetime | None = None,
+    last_synced_at: datetime | None | object = _UNSET,
     now: datetime | None = None,
 ) -> HealthResult:
     """Calcula saúde somente sobre evidências observadas.
 
-    A cobertura informa quanto da política pôde ser avaliada. Um repositório sem
-    sincronização detalhada fica UNKNOWN e não recebe percentual artificial.
+    Quando ``last_synced_at`` é explicitamente ``None`` o repositório ainda não
+    possui uma leitura detalhada e fica UNKNOWN. A omissão desse argumento mantém
+    compatibilidade com o cálculo executado dentro do próprio ciclo de sync.
     """
 
     current_time = now or datetime.now(UTC)
@@ -71,6 +73,8 @@ def calculate_repository_health(
             reasons=("Aguardando primeira sincronização detalhada",),
             components={},
         )
+    effective_sync = current_time if last_synced_at is _UNSET else last_synced_at
+    assert isinstance(effective_sync, datetime)
 
     reasons: list[str] = []
     components: dict[str, dict[str, Any]] = {}
@@ -92,7 +96,7 @@ def calculate_repository_health(
         detail=availability_detail,
     )
 
-    synced = last_synced_at if last_synced_at.tzinfo else last_synced_at.replace(tzinfo=UTC)
+    synced = effective_sync if effective_sync.tzinfo else effective_sync.replace(tzinfo=UTC)
     sync_age_minutes = max(int((current_time - synced).total_seconds() // 60), 0)
     if sync_error:
         sync_points = 0
@@ -160,10 +164,7 @@ def calculate_repository_health(
         )
     elif normalized_status in RUNNING_STATUSES:
         components["ci"] = _component(
-            label="CI/CD",
-            weight=25,
-            points=20,
-            detail="Workflow em execução",
+            label="CI/CD", weight=25, points=20, detail="Workflow em execução"
         )
         reasons.append("Workflow em execução")
     elif normalized_conclusion in FAILURE_CONCLUSIONS:
@@ -207,10 +208,7 @@ def calculate_repository_health(
     if backlog_notes:
         reasons.append(backlog_detail)
     components["backlog"] = _component(
-        label="Backlog",
-        weight=10,
-        points=backlog_points,
-        detail=backlog_detail,
+        label="Backlog", weight=10, points=backlog_points, detail=backlog_detail
     )
 
     evaluated_weight = sum(
