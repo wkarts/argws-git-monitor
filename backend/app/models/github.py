@@ -121,7 +121,7 @@ class Repository(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     latest_workflow_url: Mapped[str | None] = mapped_column(String(1000))
     latest_workflow_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    health_score: Mapped[int] = mapped_column(Integer, default=70, nullable=False)
+    health_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     health_status: Mapped[HealthStatus] = mapped_column(
         Enum(HealthStatus, native_enum=False, length=20),
         default=HealthStatus.UNKNOWN,
