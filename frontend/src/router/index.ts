@@ -7,96 +7,33 @@ const router = createRouter({
   history: createWebHistory(),
   scrollBehavior: () => ({ top: 0 }),
   routes: [
+    { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { title: 'Entrar' } },
     {
-      path: '/login',
-      name: 'login',
-      component: () => import('../views/LoginView.vue'),
-      meta: { title: 'Entrar' }
-    },
-    {
-      path: '/',
-      component: AppShell,
-      meta: { requiresAuth: true },
-      children: [
-        {
-          path: '',
-          name: 'dashboard',
-          component: () => import('../views/DashboardView.vue'),
-          meta: { title: 'Visão geral' }
-        },
-        {
-          path: 'repositories',
-          name: 'repositories',
-          component: () => import('../views/RepositoriesView.vue'),
-          meta: { title: 'Repositórios' }
-        },
-        {
-          path: 'repositories/:id',
-          name: 'repository-detail',
-          component: () => import('../views/RepositoryDetailView.vue'),
-          meta: { title: 'Detalhes do repositório' }
-        },
-        {
-          path: 'pull-requests',
-          name: 'pull-requests',
-          component: () => import('../views/PullRequestsView.vue'),
-          meta: { title: 'Pull Requests' }
-        },
-        {
-          path: 'actions',
-          name: 'actions',
-          component: () => import('../views/ActionsView.vue'),
-          meta: { title: 'GitHub Actions' }
-        },
-        {
-          path: 'releases',
-          name: 'releases',
-          component: () => import('../views/ReleasesView.vue'),
-          meta: { title: 'Releases' }
-        },
-        {
-          path: 'issues',
-          name: 'issues',
-          component: () => import('../views/IssuesView.vue'),
-          meta: { title: 'Issues' }
-        },
-        {
-          path: 'notifications',
-          name: 'notifications',
-          component: () => import('../views/NotificationsView.vue'),
-          meta: { title: 'Notificações' }
-        },
-        {
-          path: 'settings',
-          name: 'settings',
-          component: () => import('../views/SettingsView.vue'),
-          meta: { title: 'Configurações' }
-        }
+      path: '/', component: AppShell, meta: { requiresAuth: true }, children: [
+        { path: '', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: 'Visão geral' } },
+        { path: 'repositories', name: 'repositories', component: () => import('../views/RepositoriesView.vue'), meta: { title: 'Repositórios' } },
+        { path: 'repositories/:id', name: 'repository-detail', component: () => import('../views/RepositoryDetailView.vue'), meta: { title: 'Detalhes do repositório' } },
+        { path: 'pull-requests', name: 'pull-requests', component: () => import('../views/PullRequestsView.vue'), meta: { title: 'Pull Requests' } },
+        { path: 'actions', name: 'actions', component: () => import('../views/ActionsView.vue'), meta: { title: 'GitHub Actions' } },
+        { path: 'releases', name: 'releases', component: () => import('../views/ReleasesView.vue'), meta: { title: 'Releases' } },
+        { path: 'issues', name: 'issues', component: () => import('../views/IssuesView.vue'), meta: { title: 'Issues' } },
+        { path: 'jobs', name: 'jobs', component: () => import('../views/QueueView.vue'), meta: { title: 'Fila operacional' } },
+        { path: 'notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: 'Notificações' } },
+        { path: 'users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: 'Usuários e segurança', requiresSuperuser: true } },
+        { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { title: 'Configurações' } }
       ]
     },
-    {
-      path: '/:pathMatch(.*)*',
-      name: 'not-found',
-      component: () => import('../views/NotFoundView.vue'),
-      meta: { title: 'Página não encontrada' }
-    }
+    { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/NotFoundView.vue'), meta: { title: 'Página não encontrada' } }
   ]
 })
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore(pinia)
   await auth.initialize()
-  if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    return { name: 'login', query: { redirect: to.fullPath } }
-  }
+  if (to.meta.requiresAuth && !auth.isAuthenticated) return { name: 'login', query: { redirect: to.fullPath } }
   if (to.name === 'login' && auth.isAuthenticated) return { name: 'dashboard' }
-  if (
-    to.meta.requiresAuth &&
-    auth.user?.must_change_password &&
-    to.name !== 'settings'
-  ) {
-    return { name: 'settings', query: { password: 'required' } }
-  }
+  if (to.meta.requiresSuperuser && !auth.user?.is_superuser) return { name: 'dashboard' }
+  if (to.meta.requiresAuth && auth.user?.must_change_password && to.name !== 'settings') return { name: 'settings', query: { password: 'required' } }
   return true
 })
 
