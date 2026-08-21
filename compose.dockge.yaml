@@ -1,12 +1,15 @@
 name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
 # Compatibilidade na raiz. Os pacotes separados e documentados ficam em deploy/.
+# Imagens sempre :latest; dados e logs persistem em ./data-*.
 
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
   APP_ENV: ${APP_ENV:-production}
   APP_DEBUG: ${APP_DEBUG:-false}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_STACK_ROOT: /var/log/argws-stack
+  LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-30}
   APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY obrigatória}
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY obrigatória}
   PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
@@ -24,7 +27,7 @@ x-app-environment: &app-environment
   GITHUB_REPOSITORY_LIMIT: ${GITHUB_REPOSITORY_LIMIT:-300}
   GITHUB_REQUEST_TIMEOUT_SECONDS: ${GITHUB_REQUEST_TIMEOUT_SECONDS:-30}
   GITHUB_CONCURRENCY: ${GITHUB_CONCURRENCY:-5}
-  SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-600}
+  SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-3600}
   DEMO_DATA_ENABLED: ${DEMO_DATA_ENABLED:-true}
   NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
 
@@ -34,48 +37,67 @@ x-api-service: &api-service
   env_file:
     - .env
   environment: *app-environment
-  networks:
-    - gitmonitor
-  security_opt:
-    - no-new-privileges:true
+  volumes:
+    - ./data-logs:/var/log/argws-stack
+  networks: [gitmonitor]
+  security_opt: ["no-new-privileges:true"]
   init: true
 
 services:
+  logs-init:
+    image: alpine:3.21
+    restart: "no"
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - |
+        for dir in api worker beat migrate web postgres redis rabbitmq; do
+          mkdir -p "/logs/$dir"
+        done
+        chmod -R a+rwx /logs
+    volumes:
+      - ./data-logs:/logs
+    security_opt: ["no-new-privileges:true"]
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    command: ["postgres","-c","logging_collector=on","-c","log_directory=/var/log/postgresql","-c","log_filename=postgresql-%Y-%m-%d.log","-c","log_rotation_age=1d","-c","log_truncate_on_rotation=on"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-gitmonitor}
       POSTGRES_USER: ${POSTGRES_USER:-gitmonitor}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatória}
     volumes:
       - ./data-postgres:/var/lib/postgresql/data
-    networks:
-      - gitmonitor
+      - ./data-logs/postgres:/var/log/postgresql
+    networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gitmonitor} -d ${POSTGRES_DB:-gitmonitor}"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 10s
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
 
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    command: ["redis-server","--appendonly","yes","--save","60","1000","--logfile","/var/log/redis/redis.log"]
     volumes:
       - ./data-redis:/data
-    networks:
-      - gitmonitor
+      - ./data-logs/redis:/var/log/redis
+    networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
 
   rabbitmq:
     image: rabbitmq:4-management-alpine
@@ -83,30 +105,35 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-gitmonitor}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS obrigatória}
+      RABBITMQ_LOGS: /var/log/rabbitmq/rabbit.log
+      RABBITMQ_SASL_LOGS: /var/log/rabbitmq/rabbit-sasl.log
     volumes:
       - ./data-rabbitmq:/var/lib/rabbitmq
+      - ./data-logs/rabbitmq:/var/log/rabbitmq
     ports:
       - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
-    networks:
-      - gitmonitor
+    networks: [gitmonitor]
+    depends_on:
+      logs-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 8s
       retries: 12
       start_period: 20s
-    security_opt:
-      - no-new-privileges:true
+    security_opt: ["no-new-privileges:true"]
 
   migrate:
     <<: *api-service
     command: ["migrate"]
     restart: "no"
-    healthcheck:
-      disable: true
+    environment:
+      <<: *app-environment
+      SERVICE_ROLE: migrate
+      LOG_FILE: /var/log/argws-stack/migrate/migrate.log
+    healthcheck: { disable: true }
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres: { condition: service_healthy }
 
   api:
     <<: *api-service
@@ -114,14 +141,13 @@ services:
     command: ["api"]
     environment:
       <<: *app-environment
+      SERVICE_ROLE: api
+      LOG_FILE: /var/log/argws-stack/api/api.log
       API_WORKERS: ${API_WORKERS:-2}
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
   worker:
     <<: *api-service
@@ -129,45 +155,42 @@ services:
     command: ["worker"]
     environment:
       <<: *app-environment
+      SERVICE_ROLE: worker
+      LOG_FILE: /var/log/argws-stack/worker/worker.log
       CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-2}
       CELERY_MAX_TASKS_PER_CHILD: ${CELERY_MAX_TASKS_PER_CHILD:-100}
-    healthcheck:
-      disable: true
+    healthcheck: { disable: true }
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
   beat:
     <<: *api-service
     restart: unless-stopped
     command: ["beat"]
-    healthcheck:
-      disable: true
+    environment:
+      <<: *app-environment
+      SERVICE_ROLE: beat
+      LOG_FILE: /var/log/argws-stack/beat/beat.log
+    healthcheck: { disable: true }
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
 
   web:
     image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:latest
     pull_policy: always
     restart: unless-stopped
+    volumes:
+      - ./data-logs/web:/var/log/nginx
     ports:
       - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_HTTP_PORT:-8080}:80"
-    networks:
-      - gitmonitor
+    networks: [gitmonitor]
     depends_on:
-      api:
-        condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
+      api: { condition: service_healthy }
+    security_opt: ["no-new-privileges:true"]
 
 networks:
   gitmonitor:
