@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "ARGWS Git Monitor"
-    app_version: str = "0.2.3"
+    app_version: str = "0.3.0"
     app_env: Literal["development", "test", "production"] = "production"
     app_debug: bool = False
     log_level: str = "INFO"
