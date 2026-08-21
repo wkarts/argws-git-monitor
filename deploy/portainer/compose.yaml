@@ -1,6 +1,6 @@
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
-  APP_VERSION: ${APP_VERSION:-0.2.3}
+  APP_VERSION: ${APP_VERSION:-0.3.0}
   APP_ENV: ${APP_ENV:-production}
   APP_DEBUG: ${APP_DEBUG:-false}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -26,7 +26,7 @@ x-app-environment: &app-environment
   NOTIFICATION_RETENTION_DAYS: ${NOTIFICATION_RETENTION_DAYS:-90}
 
 x-api-service: &api-service
-  image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:${IMAGE_TAG:-0.2.3}
+  image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:${IMAGE_TAG:-0.3.0}
   environment: *app-environment
   networks:
     - gitmonitor
@@ -150,7 +150,7 @@ services:
         condition: service_healthy
 
   web:
-    image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:${IMAGE_TAG:-0.2.3}
+    image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:${IMAGE_TAG:-0.3.0}
     restart: unless-stopped
     ports:
       - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_HTTP_PORT:-8080}:80"
