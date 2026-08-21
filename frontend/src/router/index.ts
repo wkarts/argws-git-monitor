@@ -17,6 +17,7 @@ const router = createRouter({
         { path: 'actions', name: 'actions', component: () => import('../views/ActionsView.vue'), meta: { title: 'GitHub Actions' } },
         { path: 'releases', name: 'releases', component: () => import('../views/ReleasesView.vue'), meta: { title: 'Releases' } },
         { path: 'issues', name: 'issues', component: () => import('../views/IssuesView.vue'), meta: { title: 'Issues' } },
+        { path: 'github-tools', name: 'github-tools', component: () => import('../views/GitHubToolsView.vue'), meta: { title: 'GitHub Tools' } },
         { path: 'jobs', name: 'jobs', component: () => import('../views/QueueView.vue'), meta: { title: 'Fila operacional' } },
         { path: 'notifications', name: 'notifications', component: () => import('../views/NotificationsView.vue'), meta: { title: 'Notificações' } },
         { path: 'users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: 'Usuários e segurança', requiresSuperuser: true } },
