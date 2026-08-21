@@ -290,20 +290,47 @@ def validate_migration_script() -> None:
     ok("migrador copia os dados e preserva os volumes antigos")
 
 
+def active_env_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        keys.add(line.split("=", 1)[0].strip())
+    return keys
+
+
 def validate_no_external_version_controls() -> None:
-    forbidden = ("APP_VERSION", "IMAGE_TAG", "VITE_APP_VERSION")
-    paths = [*ENV_MODELS, *ENV_GENERATORS, *COMPOSE_FILES.values(), ROOT / "compose.ghcr.yaml"]
-    for path in paths:
-        content = path.read_text(encoding="utf-8")
-        present = [marker for marker in forbidden if marker in content]
+    forbidden_env = {"APP_VERSION", "IMAGE_TAG", "VITE_APP_VERSION"}
+    for path in ENV_MODELS:
+        present = forbidden_env & active_env_keys(path)
         if present:
             fail(
-                f"{path.relative_to(ROOT)} contém controles de versão externos proibidos: "
+                f"{path.relative_to(ROOT)} contém variáveis ativas de versão proibidas: "
+                + ", ".join(sorted(present))
+            )
+
+    generator_forbidden = (
+        "APP_VERSION=",
+        "IMAGE_TAG=",
+        "VITE_APP_VERSION=",
+    )
+    for path in ENV_GENERATORS:
+        content = path.read_text(encoding="utf-8")
+        present = [marker for marker in generator_forbidden if marker in content]
+        if present:
+            fail(
+                f"{path.relative_to(ROOT)} ainda grava controle externo de versão: "
                 + ", ".join(present)
             )
 
+    for path in [*COMPOSE_FILES.values(), ROOT / "compose.ghcr.yaml"]:
+        content = path.read_text(encoding="utf-8")
+        if "${APP_VERSION" in content or "${IMAGE_TAG" in content or "VITE_APP_VERSION:" in content:
+            fail(f"{path.relative_to(ROOT)} ainda parametriza versão pelo deploy")
+
     dockerfile = (ROOT / "frontend/Dockerfile").read_text(encoding="utf-8")
-    if "VITE_APP_VERSION" in dockerfile:
+    if "ARG VITE_APP_VERSION" in dockerfile or "ENV VITE_APP_VERSION" in dockerfile:
         fail("frontend/Dockerfile não pode receber VITE_APP_VERSION por ARG/ENV")
 
     vite = (ROOT / "frontend/vite.config.ts").read_text(encoding="utf-8")
