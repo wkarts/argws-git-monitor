@@ -1,16 +1,16 @@
 services:
   migrate:
-    image: ghcr.io/wkarts/argws-git-monitor-api:${IMAGE_TAG:-latest}
+    image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:latest
     pull_policy: always
   api:
-    image: ghcr.io/wkarts/argws-git-monitor-api:${IMAGE_TAG:-latest}
+    image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:latest
     pull_policy: always
   worker:
-    image: ghcr.io/wkarts/argws-git-monitor-api:${IMAGE_TAG:-latest}
+    image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:latest
     pull_policy: always
   beat:
-    image: ghcr.io/wkarts/argws-git-monitor-api:${IMAGE_TAG:-latest}
+    image: ${API_IMAGE:-ghcr.io/wkarts/argws-git-monitor-api}:latest
     pull_policy: always
   web:
-    image: ghcr.io/wkarts/argws-git-monitor-web:${IMAGE_TAG:-latest}
+    image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:latest
     pull_policy: always
