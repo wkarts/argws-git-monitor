@@ -18,8 +18,11 @@ if [[ ! -f .env ]]; then
   bash generate-env.sh
 fi
 
-docker compose --env-file .env -f compose.yaml config -q
-docker compose --env-file .env -f compose.yaml pull
-docker compose --env-file .env -f compose.yaml up -d --no-build --remove-orphans
-docker compose --env-file .env -f compose.yaml ps
+compose=(docker compose --env-file .env -f compose.yaml)
+"${compose[@]}" config -q
+"${compose[@]}" pull
+"${compose[@]}" up -d --no-build --force-recreate --remove-orphans
+"${compose[@]}" ps
+printf 'Imagens: GHCR :latest\n'
+printf 'Versão: lida do próprio aplicativo\n'
 printf 'Dados persistentes em:\n- %s/data-postgres\n- %s/data-redis\n- %s/data-rabbitmq\n' "$ROOT" "$ROOT" "$ROOT"
