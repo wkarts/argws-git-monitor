@@ -104,3 +104,20 @@ class IssueSummaryRead(BaseModel):
     health_score: int
     health_status: str
     last_synced_at: datetime | None
+
+
+class OperationModuleStatus(BaseModel):
+    key: str
+    label: str
+    monitored_repositories: int
+    observed_repositories: int
+    error_repositories: int
+    item_count: int
+    last_observed_at: datetime | None
+    errors: list[str] = Field(default_factory=list)
+
+
+class OperationsStatusResponse(BaseModel):
+    monitored_repositories: int
+    last_repository_sync_at: datetime | None
+    modules: list[OperationModuleStatus]
