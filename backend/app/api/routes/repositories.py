@@ -7,7 +7,6 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
-from app.models.activity import SyncJob
 from app.models.github import (
     GitHubConnection,
     HealthStatus,
