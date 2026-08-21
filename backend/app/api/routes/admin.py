@@ -50,8 +50,13 @@ async def _active_superuser_count(db: DbSession) -> int:
     )
 
 
-def _row_to_read(row) -> AdminUserRead:
-    user, connection_count, repository_count, session_count = row
+def _user_read(
+    user: User,
+    *,
+    connection_count: int = 0,
+    repository_count: int = 0,
+    session_count: int = 0,
+) -> AdminUserRead:
     return AdminUserRead(
         id=user.id,
         name=user.name,
@@ -62,9 +67,23 @@ def _row_to_read(row) -> AdminUserRead:
         totp_enabled=user.totp_enabled,
         last_login_at=user.last_login_at,
         created_at=user.created_at,
+        job_title=user.job_title,
+        timezone=user.timezone,
+        locale=user.locale,
+        avatar_updated_at=user.avatar_updated_at,
         github_connection_count=int(connection_count or 0),
         repository_count=int(repository_count or 0),
         active_session_count=int(session_count or 0),
+    )
+
+
+def _row_to_read(row) -> AdminUserRead:
+    user, connection_count, repository_count, session_count = row
+    return _user_read(
+        user,
+        connection_count=connection_count,
+        repository_count=repository_count,
+        session_count=session_count,
     )
 
 
@@ -156,6 +175,10 @@ async def create_user(
         is_active=payload.is_active,
         is_superuser=payload.is_superuser,
         must_change_password=payload.must_change_password,
+        job_title=payload.job_title.strip() if payload.job_title else None,
+        timezone="America/Bahia",
+        locale="pt-BR",
+        preferences={},
         totp_enabled=False,
         recovery_codes_hashes=[],
     )
@@ -172,17 +195,7 @@ async def create_user(
     )
     await db.commit()
     await db.refresh(user)
-    return AdminUserRead(
-        id=user.id,
-        name=user.name,
-        email=user.email,
-        is_active=user.is_active,
-        is_superuser=user.is_superuser,
-        must_change_password=user.must_change_password,
-        totp_enabled=user.totp_enabled,
-        last_login_at=user.last_login_at,
-        created_at=user.created_at,
-    )
+    return _user_read(user)
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserRead)
@@ -218,6 +231,8 @@ async def update_user(
         user.email = email
     if changes.get("name") is not None:
         user.name = str(changes["name"]).strip()
+    if "job_title" in changes:
+        user.job_title = str(changes["job_title"]).strip() if changes["job_title"] else None
     for field in ("is_active", "is_superuser", "must_change_password"):
         if field in changes and changes[field] is not None:
             setattr(user, field, bool(changes[field]))
@@ -240,17 +255,7 @@ async def update_user(
     )
     await db.commit()
     await db.refresh(user)
-    return AdminUserRead(
-        id=user.id,
-        name=user.name,
-        email=user.email,
-        is_active=user.is_active,
-        is_superuser=user.is_superuser,
-        must_change_password=user.must_change_password,
-        totp_enabled=user.totp_enabled,
-        last_login_at=user.last_login_at,
-        created_at=user.created_at,
-    )
+    return _user_read(user)
 
 
 @router.post("/users/{user_id}/reset-password", response_model=AdminPasswordResetResponse)
