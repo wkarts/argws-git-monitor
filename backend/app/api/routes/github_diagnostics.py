@@ -71,7 +71,7 @@ async def diagnose_connection(
                 else:
                     observed += 1
                     if not runs:
-                        workflows = await client.list_workflows(full_name, limit=1)
+                        await client.list_workflows(full_name, limit=1)
                         warning = client.optional_warnings.get("actions_workflows")
                         if warning:
                             warnings.append(f"{full_name}: {warning}")
