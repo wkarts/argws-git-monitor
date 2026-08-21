@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.schemas.common import ORMModel
 
@@ -25,6 +26,15 @@ class LogoutRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=512)
     new_password: str = Field(min_length=12, max_length=512)
+
+
+class ProfileUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    job_title: str | None = Field(default=None, max_length=160)
+    bio: str | None = Field(default=None, max_length=2000)
+    timezone: str = Field(default="America/Bahia", min_length=1, max_length=80)
+    locale: str = Field(default="pt-BR", min_length=2, max_length=20)
+    preferences: dict[str, Any] = Field(default_factory=dict)
 
 
 class TwoFactorSetupRequest(BaseModel):
@@ -81,6 +91,22 @@ class UserRead(ORMModel):
     totp_confirmed_at: datetime | None = None
     last_login_at: datetime | None
     created_at: datetime
+    job_title: str | None = None
+    bio: str | None = None
+    timezone: str = "America/Bahia"
+    locale: str = "pt-BR"
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    avatar_updated_at: datetime | None = None
+    avatar_url: str | None = None
+
+    @model_validator(mode="after")
+    def build_avatar_url(self) -> UserRead:
+        if self.avatar_updated_at:
+            version = int(self.avatar_updated_at.timestamp())
+            self.avatar_url = f"/api/v1/auth/users/{self.id}/avatar?v={version}"
+        else:
+            self.avatar_url = None
+        return self
 
 
 class TokenPair(BaseModel):
