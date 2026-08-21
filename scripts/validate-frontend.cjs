@@ -111,5 +111,24 @@ for (const file of walk(sourceRoot).filter((item) =>
   checked += 1
 }
 
+// Contrato visual: a navegação deve ocupar o espaço intermediário da sidebar e
+// o card de monitoramento deve ficar ancorado no rodapé. Isso impede regressões
+// quando novos itens de menu forem adicionados.
+const sidebarLayoutPath = path.join(sourceRoot, 'assets', 'sidebar-layout.css')
+if (!fs.existsSync(sidebarLayoutPath)) {
+  console.error(`${sidebarLayoutPath}: contrato de layout da sidebar ausente.`)
+  failed = true
+} else {
+  const css = fs.readFileSync(sidebarLayoutPath, 'utf8')
+  if (!/\.sidebar\s+\.sidebar-nav[\s\S]*?flex:\s*1\s+1\s+auto/i.test(css)) {
+    console.error(`${sidebarLayoutPath}: sidebar-nav precisa ocupar o espaço flexível restante.`)
+    failed = true
+  }
+  if (!/\.sidebar\s+\.sidebar-monitor[\s\S]*?margin-top:\s*auto/i.test(css)) {
+    console.error(`${sidebarLayoutPath}: sidebar-monitor precisa permanecer ancorado no rodapé.`)
+    failed = true
+  }
+}
+
 if (failed) process.exit(1)
 console.log(`Frontend: ${checked} scripts TypeScript/Vue validados.`)

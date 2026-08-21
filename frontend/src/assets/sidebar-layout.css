@@ -1,0 +1,26 @@
+/*
+ * Contrato de layout da sidebar desktop.
+ *
+ * A sidebar é um flex-column com altura total da viewport. A navegação precisa
+ * consumir todo o espaço intermediário e rolar internamente; o card de
+ * monitoramento deve permanecer sempre no rodapé, independente da quantidade
+ * de itens de menu ou da altura do conteúdo principal.
+ */
+@media (min-width: 821px) {
+  .sidebar .sidebar-brand {
+    flex: 0 0 auto;
+  }
+
+  .sidebar .sidebar-nav {
+    flex: 1 1 auto !important;
+    align-content: start;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .sidebar .sidebar-monitor {
+    flex: 0 0 auto;
+    margin-top: auto !important;
+  }
+}
