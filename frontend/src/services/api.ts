@@ -55,10 +55,29 @@ async function refreshSession(): Promise<boolean> {
   return refreshPromise
 }
 
+function gatewayMessage(status: number): string | null {
+  if (status === 502) return 'A API está reiniciando ou temporariamente indisponível (HTTP 502). Tente novamente em alguns segundos.'
+  if (status === 503) return 'A API está temporariamente indisponível (HTTP 503). Tente novamente em alguns segundos.'
+  if (status === 504) return 'A API não respondeu dentro do tempo esperado (HTTP 504). Tente novamente.'
+  return null
+}
+
 async function parseError(response: Response): Promise<ApiError> {
   const rawBody = await response.text().catch(() => '')
+  const contentType = (response.headers.get('content-type') || '').toLowerCase()
+  const looksLikeHtml = contentType.includes('text/html') || /^\s*(?:<!doctype\s+html|<html\b)/i.test(rawBody)
+  const gateway = gatewayMessage(response.status)
+
+  if (gateway || looksLikeHtml) {
+    return new ApiError(
+      gateway || `O proxy retornou uma resposta inválida (HTTP ${response.status}).`,
+      response.status,
+      rawBody ? { content_type: contentType, body_preview: rawBody.slice(0, 500) } : undefined
+    )
+  }
+
   let detail: unknown = rawBody || undefined
-  let message = rawBody || `Erro HTTP ${response.status}`
+  let message = rawBody ? rawBody.slice(0, 1000) : `Erro HTTP ${response.status}`
 
   if (rawBody) {
     try {
@@ -77,7 +96,7 @@ async function parseError(response: Response): Promise<ApiError> {
         }
       }
     } catch {
-      // Mantém a resposta textual quando o servidor não retorna JSON.
+      // Mantém resposta textual curta quando o servidor não retorna JSON.
     }
   }
   return new ApiError(message, response.status, detail)
