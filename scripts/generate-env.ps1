@@ -9,7 +9,15 @@ $CredentialsPath = Join-Path $Root "CREDENCIAIS_INICIAIS.txt"
 $DataDirectories = @(
     (Join-Path $Root "data-postgres"),
     (Join-Path $Root "data-redis"),
-    (Join-Path $Root "data-rabbitmq")
+    (Join-Path $Root "data-rabbitmq"),
+    (Join-Path $Root "data-logs\api"),
+    (Join-Path $Root "data-logs\worker"),
+    (Join-Path $Root "data-logs\beat"),
+    (Join-Path $Root "data-logs\migrate"),
+    (Join-Path $Root "data-logs\web"),
+    (Join-Path $Root "data-logs\postgres"),
+    (Join-Path $Root "data-logs\redis"),
+    (Join-Path $Root "data-logs\rabbitmq")
 )
 
 foreach ($Directory in $DataDirectories) {
@@ -50,6 +58,7 @@ APP_NAME="ARGWS Git Monitor"
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
+LOG_RETENTION_DAYS=30
 APP_HTTP_PORT=$Port
 APP_BIND_ADDRESS=0.0.0.0
 PUBLIC_BASE_URL=$Url
@@ -71,7 +80,7 @@ GITHUB_WEBHOOK_SECRET=$WebhookSecret
 GITHUB_REPOSITORY_LIMIT=300
 GITHUB_REQUEST_TIMEOUT_SECONDS=30
 GITHUB_CONCURRENCY=5
-SYNC_INTERVAL_SECONDS=600
+SYNC_INTERVAL_SECONDS=3600
 DEMO_DATA_ENABLED=true
 NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
@@ -94,7 +103,7 @@ Senha:     $RabbitPassword
 
 A aplicação exige a troca da senha administrativa no primeiro acesso.
 Este arquivo e o .env estão ignorados pelo Git.
-Dados persistentes: .\data-postgres, .\data-redis e .\data-rabbitmq.
+Dados persistentes: .\data-postgres, .\data-redis, .\data-rabbitmq e .\data-logs.
 As imagens GHCR usam sempre :latest e a versão é lida do próprio aplicativo.
 "@
 
@@ -104,4 +113,4 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 Write-Host "Segredos gerados em $EnvPath" -ForegroundColor Green
 Write-Host "Credenciais gravadas em $CredentialsPath" -ForegroundColor Green
-Write-Host "Dados persistentes em $Root\data-postgres, $Root\data-redis e $Root\data-rabbitmq" -ForegroundColor Green
+Write-Host "Dados persistentes em $Root\data-postgres, $Root\data-redis, $Root\data-rabbitmq e $Root\data-logs" -ForegroundColor Green
