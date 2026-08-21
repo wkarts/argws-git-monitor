@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.github import HealthStatus
 from app.schemas.common import ORMModel
@@ -110,6 +110,16 @@ class RepositoryDetail(RepositoryRead):
 
 class RepositoryUpdate(BaseModel):
     monitoring_enabled: bool
+
+
+class RepositoryRemoteUpdate(BaseModel):
+    private: bool | None = None
+    archived: bool | None = None
+    description: str | None = Field(default=None, max_length=350)
+
+
+class RepositoryDeleteRequest(BaseModel):
+    confirmation: str = Field(min_length=1, max_length=520)
 
 
 class WorkflowActionResponse(BaseModel):
