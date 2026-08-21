@@ -14,6 +14,13 @@ export interface User {
   totp_confirmed_at: string | null
   last_login_at: string | null
   created_at: string
+  job_title: string | null
+  bio: string | null
+  timezone: string
+  locale: string
+  preferences: Record<string, unknown>
+  avatar_updated_at: string | null
+  avatar_url: string | null
 }
 
 export interface TokenPair {
@@ -114,6 +121,15 @@ export interface HealthComponent {
   detail: string
 }
 
+export interface SyncSourceState {
+  observed: boolean
+  count: number
+  error: string | null
+  observed_at: string | null
+  workflow_count?: number
+  run_count?: number
+}
+
 export interface Repository {
   id: string
   connection_id: string
@@ -158,6 +174,7 @@ export interface Repository {
   health_coverage: number
   health_reasons: string[]
   health_components: Record<string, HealthComponent>
+  sync_sources: Record<string, SyncSourceState>
   monitoring_enabled: boolean
   last_synced_at: string | null
   sync_error: string | null
@@ -289,6 +306,24 @@ export interface OperationRelease extends Release {
   repository_full_name: string
   repository_private: boolean
 }
+export interface OperationIssue {
+  id: string
+  repository_id: string
+  repository_full_name: string
+  repository_private: boolean
+  github_id: number
+  number: number
+  title: string
+  state: string
+  html_url: string
+  user_login: string | null
+  comments: number
+  locked: boolean
+  labels: string[]
+  github_created_at: string | null
+  github_updated_at: string | null
+  closed_at: string | null
+}
 export interface IssueSummary {
   repository_id: string
   repository_full_name: string
@@ -298,6 +333,22 @@ export interface IssueSummary {
   health_score: number
   health_status: HealthStatus
   last_synced_at: string | null
+}
+
+export interface OperationModuleStatus {
+  key: string
+  label: string
+  monitored_repositories: number
+  observed_repositories: number
+  error_repositories: number
+  item_count: number
+  last_observed_at: string | null
+  errors: string[]
+}
+export interface OperationsStatus {
+  monitored_repositories: number
+  last_repository_sync_at: string | null
+  modules: OperationModuleStatus[]
 }
 
 export interface SyncJob {
@@ -431,4 +482,49 @@ export interface InactivityEvaluationResult {
   notified: number
   skipped: number
   failed: number
+}
+
+export interface LogSource {
+  key: string
+  label: string
+  category: string
+  available: boolean
+  file_count: number
+  size_bytes: number
+  last_modified_at: string | null
+}
+export interface LogLine {
+  source: string
+  file: string
+  line_number: number | null
+  timestamp: string | null
+  level: string | null
+  logger: string | null
+  service: string | null
+  message: string
+  raw: string
+  extra: Record<string, unknown>
+}
+export interface LogTailResponse {
+  source: LogSource
+  files: string[]
+  lines: LogLine[]
+  truncated: boolean
+}
+export interface AuditLogItem {
+  id: string
+  user_id: string | null
+  user_name: string | null
+  user_email: string | null
+  action: string
+  entity_type: string | null
+  entity_id: string | null
+  details: Record<string, unknown>
+  ip_address: string | null
+  created_at: string
+}
+export interface LogPurgeResult {
+  deleted_files: number
+  reclaimed_bytes: number
+  sources: Record<string, number>
 }
