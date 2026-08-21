@@ -21,6 +21,11 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
   retryOnUnauthorized?: boolean
 }
 
+export interface DownloadResult {
+  blob: Blob
+  filename: string | null
+}
+
 let refreshPromise: Promise<boolean> | null = null
 
 async function refreshSession(): Promise<boolean> {
@@ -127,6 +132,29 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return (await response.json()) as T
 }
 
+async function download(path: string, retryOnUnauthorized = true): Promise<DownloadResult> {
+  const headers = new Headers()
+  const session = readAuthSession()
+  if (session?.accessToken) headers.set('Authorization', `Bearer ${session.accessToken}`)
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${path}`, { method: 'GET', headers })
+  } catch (error) {
+    throw new ApiError('Não foi possível baixar o arquivo.', 0, error)
+  }
+  if (response.status === 401 && retryOnUnauthorized) {
+    const refreshed = await refreshSession()
+    if (refreshed) return download(path, false)
+  }
+  if (!response.ok) throw await parseError(response)
+  const disposition = response.headers.get('content-disposition') || ''
+  const match = disposition.match(/filename="?([^";]+)"?/i)
+  return {
+    blob: await response.blob(),
+    filename: match?.[1] || null
+  }
+}
+
 export const api = {
   get<T>(path: string, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: 'GET' })
@@ -134,10 +162,14 @@ export const api = {
   post<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: 'POST', body })
   },
+  put<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    return request<T>(path, { ...options, method: 'PUT', body })
+  },
   patch<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: 'PATCH', body })
   },
   delete<T>(path: string, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: 'DELETE' })
-  }
+  },
+  download
 }

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, JSON, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -24,6 +24,15 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    job_title: Mapped[str | None] = mapped_column(String(160))
+    bio: Mapped[str | None] = mapped_column(Text)
+    timezone: Mapped[str] = mapped_column(String(80), default="America/Bahia", nullable=False)
+    locale: Mapped[str] = mapped_column(String(20), default="pt-BR", nullable=False)
+    preferences: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    avatar_mime: Mapped[str | None] = mapped_column(String(100))
+    avatar_blob: Mapped[bytes | None] = mapped_column(LargeBinary)
+    avatar_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     totp_secret_encrypted: Mapped[str | None] = mapped_column(Text)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

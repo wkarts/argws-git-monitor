@@ -3,7 +3,10 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
-mkdir -p data-postgres data-redis data-rabbitmq
+mkdir -p \
+  data-postgres data-redis data-rabbitmq \
+  data-logs/api data-logs/worker data-logs/beat data-logs/migrate \
+  data-logs/web data-logs/postgres data-logs/redis data-logs/rabbitmq
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker não encontrado." >&2
@@ -33,7 +36,7 @@ for _ in $(seq 1 90); do
     echo "Stack pronta em http://127.0.0.1:${PORT} para o reverse proxy do CloudPanel."
     echo "Imagens GHCR: :latest"
     echo "Versão: obtida do próprio aplicativo"
-    echo "Dados em $ROOT/data-postgres, $ROOT/data-redis e $ROOT/data-rabbitmq"
+    echo "Dados em $ROOT/data-postgres, $ROOT/data-redis, $ROOT/data-rabbitmq e $ROOT/data-logs"
     exit 0
   fi
   sleep 2

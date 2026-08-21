@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
@@ -8,8 +9,6 @@ from app.models.github import GitHubConnection, HealthStatus, Repository, Workfl
 from app.schemas.dashboard import DashboardResponse, DashboardStats, DashboardWorkflow
 from app.schemas.notification import NotificationRead
 from app.schemas.repository import RepositoryRead, WorkflowRunRead
-
-from fastapi import APIRouter
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -20,12 +19,10 @@ async def dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespon
         select(Repository)
         .join(GitHubConnection)
         .where(GitHubConnection.user_id == current_user.id)
-        .order_by(
-            Repository.health_score.asc(),
-            Repository.github_updated_at.desc().nullslast(),
-        )
+        .order_by(Repository.github_updated_at.desc().nullslast(), Repository.full_name.asc())
     )
-    repositories = repository_result.scalars().all()
+    repository_models = repository_result.scalars().all()
+    repositories = [RepositoryRead.model_validate(item) for item in repository_models]
 
     notification_result = await db.execute(
         select(Notification)
@@ -49,7 +46,6 @@ async def dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespon
     for repository in repositories:
         health_counts[repository.health_status] += 1
 
-    # Conta todas as não lidas no banco, sem carregar seus identificadores em memória.
     unread_result = await db.execute(
         select(func.count(Notification.id)).where(
             Notification.user_id == current_user.id,
@@ -58,8 +54,15 @@ async def dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespon
     )
     unread = int(unread_result.scalar_one())
 
+    evaluated = [item for item in repositories if item.health_status != HealthStatus.UNKNOWN]
     total = len(repositories)
-    average = round(sum(item.health_score for item in repositories) / total) if total else 0
+    average_score = (
+        round(sum(item.health_score for item in evaluated) / len(evaluated)) if evaluated else 0
+    )
+    average_coverage = (
+        round(sum(item.health_coverage for item in evaluated) / len(evaluated)) if evaluated else 0
+    )
+
     stats = DashboardStats(
         total_repositories=total,
         private_repositories=sum(1 for item in repositories if item.private),
@@ -69,10 +72,13 @@ async def dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespon
         attention=health_counts[HealthStatus.ATTENTION],
         failing=health_counts[HealthStatus.FAILING],
         unknown=health_counts[HealthStatus.UNKNOWN],
+        health_evaluated=len(evaluated),
+        health_pending=total - len(evaluated),
+        average_health_score=average_score,
+        average_health_coverage=average_coverage,
         open_pull_requests=sum(item.open_pr_count for item in repositories),
         open_issues=sum(item.open_issue_count for item in repositories),
         unread_notifications=unread,
-        average_health_score=average,
     )
 
     recent_workflows: list[DashboardWorkflow] = []
@@ -88,7 +94,7 @@ async def dashboard(current_user: CurrentUser, db: DbSession) -> DashboardRespon
 
     return DashboardResponse(
         stats=stats,
-        repositories=[RepositoryRead.model_validate(item) for item in repositories[:12]],
+        repositories=repositories[:12],
         recent_workflows=recent_workflows,
         recent_notifications=[NotificationRead.model_validate(item) for item in notifications],
     )

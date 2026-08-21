@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argws-git-monitor-api"
-version = "0.3.1"
+version = "0.4.0"
 description = "API e workers do ARGWS Git Monitor"
 readme = "README.md"
 requires-python = ">=3.13,<3.15"
@@ -57,3 +57,7 @@ ignore = ["S101", "B008"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+# Estes dois módulos preservam imports de tipagem/compatibilidade durante a
+# transição da v0.4.0; o ignore é restrito somente ao F401 nesses arquivos.
+"app/api/routes/github.py" = ["F401"]
+"app/services/inactivity_monitor.py" = ["F401"]

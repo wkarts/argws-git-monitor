@@ -21,6 +21,19 @@ export const useAuthStore = defineStore('auth', () => {
     session.value = readAuthSession()
   }
 
+  function setUser(updatedUser: User): void {
+    if (!session.value) return
+    session.value = { ...session.value, user: updatedUser }
+    saveAuthSession(session.value)
+  }
+
+  async function refreshUser(): Promise<User | null> {
+    if (!session.value) return null
+    const currentUser = await api.get<User>('/auth/me')
+    setUser(currentUser)
+    return currentUser
+  }
+
   if (typeof window !== 'undefined') {
     window.addEventListener('argws-auth-updated', updateFromStorage)
     window.addEventListener('argws-auth-cleared', updateFromStorage)
@@ -33,9 +46,7 @@ export const useAuthStore = defineStore('auth', () => {
       return
     }
     try {
-      const currentUser = await api.get<User>('/auth/me')
-      session.value = { ...session.value, user: currentUser }
-      saveAuthSession(session.value)
+      await refreshUser()
     } catch {
       clearAuthSession()
       session.value = null
@@ -99,6 +110,8 @@ export const useAuthStore = defineStore('auth', () => {
     initialize,
     login,
     logout,
-    changePassword
+    changePassword,
+    setUser,
+    refreshUser
   }
 })

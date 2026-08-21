@@ -16,6 +16,12 @@ from app.models.github import (
     Repository,
     WorkflowRun,
 )
+from app.models.inactivity import (
+    InactivityActionLog,
+    InactivityPolicy,
+    InactivityPolicyRepository,
+)
+from app.models.issue import Issue
 from app.models.user import RefreshToken, User
 
 __all__ = [
@@ -24,6 +30,10 @@ __all__ = [
     "ConnectionStatus",
     "GitHubConnection",
     "HealthStatus",
+    "InactivityActionLog",
+    "InactivityPolicy",
+    "InactivityPolicyRepository",
+    "Issue",
     "Notification",
     "NotificationSeverity",
     "PullRequest",

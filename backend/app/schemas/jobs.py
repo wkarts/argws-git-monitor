@@ -34,4 +34,9 @@ class QueueOverview(BaseModel):
     running: int
     succeeded: int
     failed: int
+    cancelled: int
     total: int
+    worker_online: bool
+    worker_count: int
+    workers: list[str]
+    worker_error: str | None = None

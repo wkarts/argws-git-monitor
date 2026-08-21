@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import select, update
 
 from app.api.deps import CurrentUser, DbSession
@@ -20,6 +20,7 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
     LogoutRequest,
+    ProfileUpdate,
     RefreshRequest,
     SessionRead,
     TokenPair,
@@ -45,6 +46,9 @@ from app.services.totp import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Autenticação"])
+
+ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 
 def _client_ip(request: Request) -> str | None:
@@ -174,6 +178,93 @@ async def logout(payload: LogoutRequest, db: DbSession) -> MessageResponse:
 @router.get("/me", response_model=UserRead)
 async def me(current_user: CurrentUser) -> UserRead:
     return UserRead.model_validate(current_user)
+
+
+@router.patch("/profile", response_model=UserRead)
+async def update_profile(
+    payload: ProfileUpdate,
+    request: Request,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> UserRead:
+    current_user.name = payload.name.strip()
+    current_user.job_title = payload.job_title.strip() if payload.job_title else None
+    current_user.bio = payload.bio.strip() if payload.bio else None
+    current_user.timezone = payload.timezone.strip()
+    current_user.locale = payload.locale.strip()
+    current_user.preferences = payload.preferences
+    await record_audit(
+        db,
+        action="auth.profile_updated",
+        user_id=current_user.id,
+        details={"timezone": current_user.timezone, "locale": current_user.locale},
+        ip_address=_client_ip(request),
+    )
+    await db.commit()
+    await db.refresh(current_user)
+    return UserRead.model_validate(current_user)
+
+
+@router.post("/avatar", response_model=UserRead)
+async def upload_avatar(
+    request: Request,
+    current_user: CurrentUser,
+    db: DbSession,
+    avatar: UploadFile = File(...),
+) -> UserRead:
+    content_type = (avatar.content_type or "").lower()
+    if content_type not in ALLOWED_AVATAR_TYPES:
+        raise HTTPException(status_code=400, detail="Avatar deve ser JPEG, PNG ou WEBP.")
+    payload = await avatar.read(MAX_AVATAR_BYTES + 1)
+    if not payload:
+        raise HTTPException(status_code=400, detail="Arquivo de avatar vazio.")
+    if len(payload) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=413, detail="Avatar excede o limite de 2 MB.")
+    current_user.avatar_blob = payload
+    current_user.avatar_mime = content_type
+    current_user.avatar_updated_at = datetime.now(UTC)
+    await record_audit(
+        db,
+        action="auth.avatar_updated",
+        user_id=current_user.id,
+        details={"mime": content_type, "size": len(payload)},
+        ip_address=_client_ip(request),
+    )
+    await db.commit()
+    await db.refresh(current_user)
+    return UserRead.model_validate(current_user)
+
+
+@router.delete("/avatar", response_model=UserRead)
+async def delete_avatar(
+    request: Request,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> UserRead:
+    current_user.avatar_blob = None
+    current_user.avatar_mime = None
+    current_user.avatar_updated_at = None
+    await record_audit(
+        db,
+        action="auth.avatar_removed",
+        user_id=current_user.id,
+        ip_address=_client_ip(request),
+    )
+    await db.commit()
+    await db.refresh(current_user)
+    return UserRead.model_validate(current_user)
+
+
+@router.get("/users/{user_id}/avatar", include_in_schema=False)
+async def avatar(user_id: uuid.UUID, db: DbSession) -> Response:
+    user = await db.get(User, user_id)
+    if not user or not user.avatar_blob or not user.avatar_mime:
+        raise HTTPException(status_code=404, detail="Avatar não encontrado.")
+    return Response(
+        content=user.avatar_blob,
+        media_type=user.avatar_mime,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
 
 
 @router.get("/sessions", response_model=list[SessionRead])

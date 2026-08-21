@@ -10,13 +10,14 @@ from app.core.config import get_settings
 from app.core.database import dispose_engine, session_scope
 from app.models.activity import Notification, SyncJob, SyncJobStatus
 from app.models.github import ConnectionStatus, GitHubConnection
-from app.services.github_sync import sync_connection, sync_repository
+from app.services.activity_observer import sync_repository_with_activity
 from app.services.job_queue import (
     create_job,
     mark_job_failed,
     mark_job_running,
     mark_job_success,
 )
+from app.services.sync_orchestrator import sync_connection_with_progress
 from app.tasks.celery_app import celery_app
 
 
@@ -56,12 +57,27 @@ def sync_connection_task(
     job_id: str | None = None,
 ):
     if job_id:
-        run_async(mark_job_running(job_id, message="Sincronizando catálogo e dados do GitHub."))
+        run_async(mark_job_running(job_id, message="Sincronizando catálogo, dados e atividade do GitHub."))
     try:
         selected = set(selected_ids) if selected_ids else None
-        result = run_async(sync_connection(connection_id, selected_github_ids=selected))
+        result = run_async(
+            sync_connection_with_progress(
+                connection_id,
+                selected_github_ids=selected,
+                job_id=job_id,
+            )
+        )
         if job_id:
-            run_async(mark_job_success(job_id, result=result, message="Sincronização concluída."))
+            run_async(
+                mark_job_success(
+                    job_id,
+                    result=result,
+                    message=(
+                        f"Sincronização concluída: {result['synced']} sucesso, "
+                        f"{result['errors']} erro(s)."
+                    ),
+                )
+            )
         return result
     except Exception as exc:
         _retry_or_fail(self, exc, job_id, max_countdown=180)
@@ -70,12 +86,12 @@ def sync_connection_task(
 @celery_app.task(name="github.sync_repository", bind=True, max_retries=2)
 def sync_repository_task(self, repository_id: str, job_id: str | None = None):
     if job_id:
-        run_async(mark_job_running(job_id, message="Atualizando commits, Actions, PRs e releases."))
+        run_async(mark_job_running(job_id, message="Atualizando commits, Actions, PRs, issues, releases e atividade."))
     try:
-        run_async(sync_repository(repository_id))
-        result = {"repository_id": repository_id, "synced": True}
+        activity = run_async(sync_repository_with_activity(repository_id))
+        result = {"repository_id": repository_id, "synced": True, "activity": activity}
         if job_id:
-            run_async(mark_job_success(job_id, result=result, message="Repositório atualizado."))
+            run_async(mark_job_success(job_id, result=result, message="Repositório e atividade atualizados."))
         return result
     except Exception as exc:
         _retry_or_fail(self, exc, job_id, max_countdown=120)

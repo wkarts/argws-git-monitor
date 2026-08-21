@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OperationWorkflowRead(BaseModel):
@@ -66,6 +66,35 @@ class OperationReleaseRead(BaseModel):
     published_at: datetime | None
 
 
+class OperationIssueRead(BaseModel):
+    id: uuid.UUID
+    repository_id: uuid.UUID
+    repository_full_name: str
+    repository_private: bool
+    github_id: int
+    number: int
+    title: str
+    state: str
+    html_url: str
+    user_login: str | None
+    comments: int
+    locked: bool
+    labels: list[str] = Field(default_factory=list)
+    github_created_at: datetime | None
+    github_updated_at: datetime | None
+    closed_at: datetime | None
+
+
+class IssueCreateRequest(BaseModel):
+    repository_id: uuid.UUID
+    title: str = Field(min_length=1, max_length=1000)
+    body: str | None = Field(default=None, max_length=65536)
+
+
+class IssueStateRequest(BaseModel):
+    state: str = Field(pattern="^(open|closed)$")
+
+
 class IssueSummaryRead(BaseModel):
     repository_id: uuid.UUID
     repository_full_name: str
@@ -75,3 +104,20 @@ class IssueSummaryRead(BaseModel):
     health_score: int
     health_status: str
     last_synced_at: datetime | None
+
+
+class OperationModuleStatus(BaseModel):
+    key: str
+    label: str
+    monitored_repositories: int
+    observed_repositories: int
+    error_repositories: int
+    item_count: int
+    last_observed_at: datetime | None
+    errors: list[str] = Field(default_factory=list)
+
+
+class OperationsStatusResponse(BaseModel):
+    monitored_repositories: int
+    last_repository_sync_at: datetime | None
+    modules: list[OperationModuleStatus]

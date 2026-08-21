@@ -41,6 +41,7 @@ backups/*
 **/data-postgres/
 **/data-redis/
 **/data-rabbitmq/
+**/data-logs/
 **/data-frontend-node-modules/
 
 # Pacotes gerados

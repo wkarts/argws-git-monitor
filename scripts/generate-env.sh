@@ -14,7 +14,18 @@ done
 [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "Porta inválida: $PORT" >&2; exit 2; }
 ENV_PATH="$ROOT/.env"
 CREDENTIALS_PATH="$ROOT/CREDENCIAIS_INICIAIS.txt"
-mkdir -p "$ROOT/data-postgres" "$ROOT/data-redis" "$ROOT/data-rabbitmq"
+mkdir -p \
+  "$ROOT/data-postgres" \
+  "$ROOT/data-redis" \
+  "$ROOT/data-rabbitmq" \
+  "$ROOT/data-logs/api" \
+  "$ROOT/data-logs/worker" \
+  "$ROOT/data-logs/beat" \
+  "$ROOT/data-logs/migrate" \
+  "$ROOT/data-logs/web" \
+  "$ROOT/data-logs/postgres" \
+  "$ROOT/data-logs/redis" \
+  "$ROOT/data-logs/rabbitmq"
 if [[ -f "$ENV_PATH" && "$FORCE" != true ]]; then
   echo "$ENV_PATH já existe; nenhuma alteração realizada."
   echo "Diretórios persistentes confirmados em $ROOT/data-*"
@@ -44,6 +55,7 @@ APP_NAME="ARGWS Git Monitor"
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
+LOG_RETENTION_DAYS=30
 APP_HTTP_PORT=${PORT}
 APP_BIND_ADDRESS=0.0.0.0
 PUBLIC_BASE_URL=${URL}
@@ -65,7 +77,7 @@ GITHUB_WEBHOOK_SECRET=${WEBHOOK_SECRET}
 GITHUB_REPOSITORY_LIMIT=300
 GITHUB_REQUEST_TIMEOUT_SECONDS=30
 GITHUB_CONCURRENCY=5
-SYNC_INTERVAL_SECONDS=600
+SYNC_INTERVAL_SECONDS=3600
 DEMO_DATA_ENABLED=true
 NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
@@ -88,9 +100,9 @@ Senha:     ${RABBIT_PASSWORD}
 
 A aplicação exige a troca da senha administrativa no primeiro acesso.
 Este arquivo e o .env estão ignorados pelo Git.
-Dados persistentes: ./data-postgres, ./data-redis e ./data-rabbitmq.
+Dados persistentes: ./data-postgres, ./data-redis, ./data-rabbitmq e ./data-logs.
 As imagens GHCR usam sempre :latest e a versão é lida do próprio aplicativo.
 EOF
 chmod 600 "$ENV_PATH" "$CREDENTIALS_PATH" 2>/dev/null || true
 printf 'Segredos gerados em %s\nCredenciais gravadas em %s\n' "$ENV_PATH" "$CREDENTIALS_PATH"
-printf 'Dados persistentes em %s/data-postgres, %s/data-redis e %s/data-rabbitmq\n' "$ROOT" "$ROOT" "$ROOT"
+printf 'Dados persistentes em %s/data-postgres, %s/data-redis, %s/data-rabbitmq e %s/data-logs\n' "$ROOT" "$ROOT" "$ROOT" "$ROOT"

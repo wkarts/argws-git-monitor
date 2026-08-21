@@ -8,6 +8,7 @@ import secrets
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+LOG_SERVICES = ("api", "worker", "beat", "migrate", "web", "postgres", "redis", "rabbitmq")
 
 
 def main() -> None:
@@ -21,6 +22,7 @@ def main() -> None:
         ROOT / "data-postgres",
         ROOT / "data-redis",
         ROOT / "data-rabbitmq",
+        *(ROOT / "data-logs" / service for service in LOG_SERVICES),
     ]
     for directory in data_directories:
         directory.mkdir(parents=True, exist_ok=True)
@@ -45,6 +47,7 @@ APP_NAME="ARGWS Git Monitor"
 APP_ENV=production
 APP_DEBUG=false
 LOG_LEVEL=INFO
+LOG_RETENTION_DAYS=30
 APP_HTTP_PORT={args.port}
 APP_BIND_ADDRESS=0.0.0.0
 PUBLIC_BASE_URL={url}
@@ -66,7 +69,7 @@ GITHUB_WEBHOOK_SECRET={values['webhook_secret']}
 GITHUB_REPOSITORY_LIMIT=300
 GITHUB_REQUEST_TIMEOUT_SECONDS=30
 GITHUB_CONCURRENCY=5
-SYNC_INTERVAL_SECONDS=600
+SYNC_INTERVAL_SECONDS=3600
 DEMO_DATA_ENABLED=true
 NOTIFICATION_RETENTION_DAYS=90
 API_WORKERS=2
@@ -84,7 +87,7 @@ Senha: {admin_password}
 RabbitMQ: http://localhost:15672
 Usuário RabbitMQ: gitmonitor
 Senha RabbitMQ: {rabbit_password}
-Dados persistentes: ./data-postgres, ./data-redis e ./data-rabbitmq.
+Dados persistentes: ./data-postgres, ./data-redis, ./data-rabbitmq e ./data-logs.
 As imagens GHCR usam sempre :latest e a versão é lida do próprio aplicativo.
 """,
         encoding="utf-8",
@@ -95,8 +98,10 @@ As imagens GHCR usam sempre :latest e a versão é lida do próprio aplicativo.
     print(f"Segredos gerados em {env_path}")
     print(f"Credenciais gravadas em {credentials_path}")
     print("Dados persistentes:")
-    for directory in data_directories:
-        print(f"- {directory}")
+    print(f"- {ROOT / 'data-postgres'}")
+    print(f"- {ROOT / 'data-redis'}")
+    print(f"- {ROOT / 'data-rabbitmq'}")
+    print(f"- {ROOT / 'data-logs'}")
 
 
 if __name__ == "__main__":

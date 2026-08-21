@@ -14,6 +14,13 @@ export interface User {
   totp_confirmed_at: string | null
   last_login_at: string | null
   created_at: string
+  job_title: string | null
+  bio: string | null
+  timezone: string
+  locale: string
+  preferences: Record<string, unknown>
+  avatar_updated_at: string | null
+  avatar_url: string | null
 }
 
 export interface TokenPair {
@@ -106,6 +113,23 @@ export interface Release {
   published_at: string | null
 }
 
+export interface HealthComponent {
+  label: string
+  weight: number
+  points: number
+  evaluated: boolean
+  detail: string
+}
+
+export interface SyncSourceState {
+  observed: boolean
+  count: number
+  error: string | null
+  observed_at: string | null
+  workflow_count?: number
+  run_count?: number
+}
+
 export interface Repository {
   id: string
   connection_id: string
@@ -141,8 +165,16 @@ export interface Repository {
   latest_workflow_conclusion: string | null
   latest_workflow_url: string | null
   latest_workflow_at: string | null
+  last_activity_at: string | null
+  last_activity_type: string | null
+  last_activity_summary: string | null
+  activity_observed_at: string | null
   health_score: number
   health_status: HealthStatus
+  health_coverage: number
+  health_reasons: string[]
+  health_components: Record<string, HealthComponent>
+  sync_sources: Record<string, SyncSourceState>
   monitoring_enabled: boolean
   last_synced_at: string | null
   sync_error: string | null
@@ -176,10 +208,13 @@ export interface DashboardStats {
   attention: number
   failing: number
   unknown: number
+  health_evaluated: number
+  health_pending: number
+  average_health_score: number
+  average_health_coverage: number
   open_pull_requests: number
   open_issues: number
   unread_notifications: number
-  average_health_score: number
 }
 
 export interface DashboardWorkflow extends WorkflowRun {
@@ -245,20 +280,9 @@ export interface PaginatedResponse<T> {
   pages: number
 }
 
-export interface MessageResponse {
-  message: string
-}
-
-export interface SyncResponse {
-  message: string
-  task_id?: string | null
-  job_id?: string | null
-}
-
-export interface WorkflowActionResponse {
-  message: string
-  run_id: number
-}
+export interface MessageResponse { message: string }
+export interface SyncResponse { message: string; task_id?: string | null; job_id?: string | null }
+export interface WorkflowActionResponse { message: string; run_id: number }
 
 export interface WebhookConfigureResult {
   repository: string
@@ -272,19 +296,34 @@ export interface OperationWorkflow extends WorkflowRun {
   repository_full_name: string
   repository_private: boolean
 }
-
 export interface OperationPullRequest extends PullRequest {
   repository_id: string
   repository_full_name: string
   repository_private: boolean
 }
-
 export interface OperationRelease extends Release {
   repository_id: string
   repository_full_name: string
   repository_private: boolean
 }
-
+export interface OperationIssue {
+  id: string
+  repository_id: string
+  repository_full_name: string
+  repository_private: boolean
+  github_id: number
+  number: number
+  title: string
+  state: string
+  html_url: string
+  user_login: string | null
+  comments: number
+  locked: boolean
+  labels: string[]
+  github_created_at: string | null
+  github_updated_at: string | null
+  closed_at: string | null
+}
 export interface IssueSummary {
   repository_id: string
   repository_full_name: string
@@ -294,6 +333,22 @@ export interface IssueSummary {
   health_score: number
   health_status: HealthStatus
   last_synced_at: string | null
+}
+
+export interface OperationModuleStatus {
+  key: string
+  label: string
+  monitored_repositories: number
+  observed_repositories: number
+  error_repositories: number
+  item_count: number
+  last_observed_at: string | null
+  errors: string[]
+}
+export interface OperationsStatus {
+  monitored_repositories: number
+  last_repository_sync_at: string | null
+  modules: OperationModuleStatus[]
 }
 
 export interface SyncJob {
@@ -320,7 +375,27 @@ export interface QueueOverview {
   running: number
   succeeded: number
   failed: number
+  cancelled: number
   total: number
+  worker_online: boolean
+  worker_count: number
+  workers: string[]
+  worker_error: string | null
+}
+
+export interface RuntimeStatus {
+  status: string
+  version: string
+  database: string
+  redis: string
+  worker_online: boolean
+  worker_count: number
+  workers: string[]
+  queued_jobs: number
+  running_jobs: number
+  failed_jobs: number
+  worker_error: string | null
+  timestamp: string
 }
 
 export interface AdminUser {
@@ -337,7 +412,6 @@ export interface AdminUser {
   repository_count: number
   active_session_count: number
 }
-
 export interface AdminOverview {
   total_users: number
   active_users: number
@@ -345,8 +419,112 @@ export interface AdminOverview {
   two_factor_enabled: number
   active_sessions: number
 }
+export interface AdminPasswordResetResponse { message: string; temporary_password: string }
 
-export interface AdminPasswordResetResponse {
+export interface GitHubTreeItem {
+  path: string
+  type: string
+  mode: string
+  sha: string
+  size: number | null
+}
+export interface PackageVersion {
+  id: number
+  name: string
+  url: string | null
+  created_at: string | null
+  updated_at: string | null
+  tags: string[]
+}
+export interface ToolResult {
   message: string
-  temporary_password: string
+  data: Record<string, unknown>
+}
+
+export interface InactivityPolicy {
+  id: string
+  user_id: string
+  name: string
+  description: string | null
+  timeout_value: number
+  timeout_unit: 'hours' | 'days' | 'weeks' | 'months'
+  action: 'private' | 'notify'
+  enabled: boolean
+  activity_sources: string[]
+  last_evaluated_at: string | null
+  created_at: string
+  updated_at: string
+  repository_ids: string[]
+  repository_count: number
+}
+
+export interface InactivityActionLog {
+  id: string
+  policy_id: string | null
+  repository_id: string | null
+  repository_full_name: string
+  action: string
+  status: string
+  previous_private: boolean | null
+  last_activity_at: string | null
+  threshold_at: string | null
+  reason: string
+  result: Record<string, unknown>
+  error: string | null
+  created_at: string
+}
+
+export interface InactivityEvaluationResult {
+  policies: number
+  repositories: number
+  due: number
+  privatized: number
+  notified: number
+  skipped: number
+  failed: number
+}
+
+export interface LogSource {
+  key: string
+  label: string
+  category: string
+  available: boolean
+  file_count: number
+  size_bytes: number
+  last_modified_at: string | null
+}
+export interface LogLine {
+  source: string
+  file: string
+  line_number: number | null
+  timestamp: string | null
+  level: string | null
+  logger: string | null
+  service: string | null
+  message: string
+  raw: string
+  extra: Record<string, unknown>
+}
+export interface LogTailResponse {
+  source: LogSource
+  files: string[]
+  lines: LogLine[]
+  truncated: boolean
+}
+export interface AuditLogItem {
+  id: string
+  user_id: string | null
+  user_name: string | null
+  user_email: string | null
+  action: string
+  entity_type: string | null
+  entity_id: string | null
+  details: Record<string, unknown>
+  ip_address: string | null
+  created_at: string
+}
+export interface LogPurgeResult {
+  deleted_files: number
+  reclaimed_bytes: number
+  sources: Record<string, number>
 }

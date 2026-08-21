@@ -33,26 +33,26 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --background:#edf2f8;
+  --background:#f1f5f9;
   --surface:#ffffff;
-  --surface-raised:#f7f9fc;
-  --surface-soft:#eef3f8;
-  --border:#b9c7d8;
-  --border-soft:#dbe3ed;
-  --text:#1f2d40;
-  --text-strong:#071425;
-  --text-muted:#43566f;
-  --text-subtle:#60738e;
-  --primary:#0078b8;
-  --primary-strong:#005d91;
-  --secondary:#6544d7;
-  --success:#147a39;
-  --info:#006ea8;
-  --warning:#9a4d00;
-  --danger:#c9222c;
-  --shadow-sm:0 6px 18px rgba(25,45,70,.09),0 1px 2px rgba(25,45,70,.06);
-  --shadow-md:0 15px 38px rgba(25,45,70,.13),0 2px 5px rgba(25,45,70,.08);
-  --shadow-lg:0 24px 64px rgba(25,45,70,.18),0 3px 9px rgba(25,45,70,.08);
+  --surface-raised:#f8fafc;
+  --surface-soft:#f1f5f9;
+  --border:#aab9cb;
+  --border-soft:#d2dce8;
+  --text:#17263a;
+  --text-strong:#041120;
+  --text-muted:#33475f;
+  --text-subtle:#52667f;
+  --primary:#006da8;
+  --primary-strong:#004f7c;
+  --secondary:#5b3dcc;
+  --success:#116c32;
+  --info:#005f91;
+  --warning:#8a4300;
+  --danger:#b91f29;
+  --shadow-sm:0 6px 18px rgba(25,45,70,.08),0 1px 2px rgba(25,45,70,.07);
+  --shadow-md:0 15px 38px rgba(25,45,70,.12),0 2px 5px rgba(25,45,70,.08);
+  --shadow-lg:0 24px 64px rgba(25,45,70,.17),0 3px 9px rgba(25,45,70,.09);
 }
 
 *,*::before,*::after { box-sizing:border-box; }
@@ -121,13 +121,16 @@ img,svg { display:block; max-width:100%; }
 .danger-text { color:var(--danger) !important; }
 .mobile-only { display:none; }
 
-:root[data-theme="light"] body { font-weight:450; }
+:root[data-theme="light"] body { font-weight:475; }
 :root[data-theme="light"] .button:not(.primary):not(.danger),
-:root[data-theme="light"] .icon-button { box-shadow:0 1px 2px rgba(22,42,66,.06); }
+:root[data-theme="light"] .icon-button { box-shadow:0 1px 2px rgba(22,42,66,.07); }
 :root[data-theme="light"] input,
 :root[data-theme="light"] select,
-:root[data-theme="light"] textarea { font-weight:550; }
-:root[data-theme="light"] option { color:#071425; background:#fff; }
+:root[data-theme="light"] textarea { font-weight:575; background:#f8fafc; }
+:root[data-theme="light"] .field > span,
+:root[data-theme="light"] .page-heading p,
+:root[data-theme="light"] small { text-rendering:optimizeLegibility; }
+:root[data-theme="light"] option { color:#041120; background:#fff; }
 :root[data-theme="light"] a { text-decoration-thickness:1px; text-underline-offset:2px; }
 
 @media (max-width: 720px) {

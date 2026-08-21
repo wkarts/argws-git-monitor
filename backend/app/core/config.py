@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "production"
     app_debug: bool = False
     log_level: str = "INFO"
+    service_role: str = "api"
+    log_file: str | None = None
+    log_stack_root: str = "/var/log/argws-stack"
+    log_retention_days: int = 30
+    log_default_tail_lines: int = 500
+    log_max_tail_lines: int = 10000
+    log_download_max_mb: int = 100
 
     api_v1_prefix: str = "/api/v1"
     public_base_url: str = "http://localhost:8080"
@@ -60,7 +67,9 @@ class Settings(BaseSettings):
     github_repository_limit: int = 300
     github_request_timeout_seconds: float = 30.0
     github_concurrency: int = 5
-    sync_interval_seconds: int = 300
+    # Full sync é reconciliação; atualizações imediatas devem vir por webhook.
+    # 1h mantém 300 repositórios confortavelmente abaixo do rate limit REST.
+    sync_interval_seconds: int = 3600
 
     demo_data_enabled: bool = True
     notification_retention_days: int = 90

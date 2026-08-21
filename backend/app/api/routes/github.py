@@ -28,6 +28,7 @@ from app.services.github_client import GitHubAPIError, GitHubClient
 from app.services.github_mapping import apply_repository_base
 from app.services.github_sync import sync_connection
 from app.services.job_queue import create_job
+from app.services.worker_status import require_worker
 from app.tasks.jobs import sync_connection_task, sync_repository_task
 
 router = APIRouter(prefix="/github", tags=["GitHub"])
@@ -71,17 +72,25 @@ async def _queue_connection_sync(
     user_id: uuid.UUID,
     kind: str,
     label: str,
+    selected_ids: list[int] | None = None,
+    progress_total: int = 0,
 ) -> tuple[SyncJob, str]:
+    await require_worker()
     job = await create_job(
         db,
         user_id=user_id,
         connection_id=connection.id,
         kind=kind,
         label=label,
+        progress_total=progress_total,
         message="Catálogo descoberto. Aguardando sincronização detalhada.",
     )
     await db.commit()
-    task = sync_connection_task.delay(str(connection.id), None, str(job.id))
+    task = sync_connection_task.delay(
+        str(connection.id),
+        selected_ids,
+        str(job.id),
+    )
     job.celery_task_id = task.id
     await db.commit()
     return job, task.id
@@ -112,7 +121,9 @@ async def create_connection(
     try:
         async with GitHubClient(payload.token, api_url=payload.api_url) as client:
             profile = await client.get_authenticated_user()
-            remote_preview = await client.list_repositories(limit=get_settings().github_repository_limit)
+            remote_preview = await client.list_repositories(
+                limit=get_settings().github_repository_limit
+            )
             rate_remaining = client.rate_limit_remaining
             rate_reset = client.rate_limit_reset_at
             oauth_scopes = list(client.oauth_scopes)
@@ -149,13 +160,21 @@ async def create_connection(
             discovery = await sync_connection(connection.id, full_sync=False)
             repository_count = discovery["repositories"]
             connection = await _owned_connection(db, connection.id, current_user.id)
-            await _queue_connection_sync(
-                db,
-                connection,
-                user_id=current_user.id,
-                kind="connection.initial_sync",
-                label=f"Sincronização inicial · {connection.name}",
-            )
+            try:
+                await _queue_connection_sync(
+                    db,
+                    connection,
+                    user_id=current_user.id,
+                    kind="connection.initial_sync",
+                    label=f"Sincronização inicial · {connection.name}",
+                    progress_total=repository_count,
+                )
+            except RuntimeError as worker_exc:
+                connection.last_error = (
+                    "Catálogo importado, porém a sincronização detalhada não foi enfileirada: "
+                    f"{worker_exc}"
+                )
+                await db.commit()
         except Exception as exc:
             connection = await _owned_connection(db, connection.id, current_user.id)
             connection.status = ConnectionStatus.ERROR
@@ -195,20 +214,34 @@ async def sync_connection_now(
     try:
         discovery = await sync_connection(connection.id, full_sync=False)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Falha ao descobrir repositórios: {exc}") from exc
+        raise HTTPException(
+            status_code=400,
+            detail=f"Falha ao descobrir repositórios: {exc}",
+        ) from exc
 
     connection = await _owned_connection(db, connection_id, current_user.id)
-    job, task_id = await _queue_connection_sync(
-        db,
-        connection,
-        user_id=current_user.id,
-        kind="connection.sync.manual",
-        label=f"Sincronização manual · {connection.name}",
-    )
+    try:
+        job, task_id = await _queue_connection_sync(
+            db,
+            connection,
+            user_id=current_user.id,
+            kind="connection.sync.manual",
+            label=f"Sincronização manual · {connection.name}",
+            progress_total=discovery["repositories"],
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{discovery['repositories']} repositório(s) foram descobertos, "
+                f"mas a sincronização detalhada não iniciou. {exc}"
+            ),
+        ) from exc
+
     return SyncAcceptedResponse(
         message=(
-            f"{discovery['repositories']} repositório(s) descoberto(s) imediatamente; "
-            "detalhes adicionados à fila."
+            f"{discovery['repositories']} repositório(s) descoberto(s); "
+            "sincronização detalhada enviada ao worker."
         ),
         task_id=task_id,
         job_id=job.id,
@@ -256,7 +289,8 @@ async def list_remote_repositories(
             language=item.get("language"),
             selected=int(item["id"]) in existing_ids,
             permissions={
-                str(key): bool(value) for key, value in (item.get("permissions") or {}).items()
+                str(key): bool(value)
+                for key, value in (item.get("permissions") or {}).items()
             },
         )
         for item in remote
@@ -293,7 +327,10 @@ async def import_repositories(
             full_sync=False,
         )
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Falha ao importar catálogo: {exc}") from exc
+        raise HTTPException(
+            status_code=400,
+            detail=f"Falha ao importar catálogo: {exc}",
+        ) from exc
 
     result = await db.execute(
         select(Repository).where(
@@ -302,37 +339,40 @@ async def import_repositories(
         )
     )
     repositories = result.scalars().all()
-    jobs: list[SyncJob] = []
-    for repository in repositories:
-        job = await create_job(
-            db,
-            user_id=current_user.id,
-            connection_id=connection.id,
-            repository_id=repository.id,
-            kind="repository.import",
-            label=f"Monitorar · {repository.full_name}",
-            message="Repositório adicionado ao monitor; aguardando sincronização detalhada.",
-        )
-        jobs.append(job)
-    await db.commit()
-
-    for repository, job in zip(repositories, jobs, strict=False):
-        task = sync_repository_task.delay(str(repository.id), str(job.id))
-        job.celery_task_id = task.id
-    await db.commit()
-
-    imported_count = sum(1 for repository in repositories if repository.github_id not in before)
+    imported_count = sum(
+        1 for repository in repositories if repository.github_id not in before
+    )
     already_monitored = len(repositories) - imported_count
+
+    try:
+        job, _task_id = await _queue_connection_sync(
+            db,
+            connection,
+            user_id=current_user.id,
+            kind="repository.import.batch",
+            label=f"Sincronizar {len(repositories)} projeto(s) · {connection.name}",
+            selected_ids=sorted(selected_ids),
+            progress_total=len(repositories),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{len(repositories)} repositório(s) já foram adicionados ao monitor, "
+                f"mas o processamento detalhado não iniciou. {exc}"
+            ),
+        ) from exc
+
     return RepositoryImportResponse(
         message=(
             f"{len(repositories)} repositório(s) já aparecem no monitor. "
-            "A sincronização detalhada pode ser acompanhada em Fila."
+            "Um único job em lote fará a sincronização detalhada."
         ),
         imported_count=imported_count,
         already_monitored_count=already_monitored,
-        queued_count=len(jobs),
+        queued_count=1,
         repository_ids=[repository.id for repository in repositories],
-        job_ids=[job.id for job in jobs],
+        job_ids=[job.id],
     )
 
 
@@ -368,9 +408,19 @@ async def create_remote_repository(
     repository = Repository(connection_id=connection.id, github_id=int(remote["id"]))
     apply_repository_base(repository, remote)
     repository.monitoring_enabled = True
-    repository.last_synced_at = datetime.now(UTC)
+    repository.last_synced_at = None
+    repository.health_score = 0
     db.add(repository)
     await db.flush()
+
+    try:
+        await require_worker()
+    except RuntimeError as exc:
+        repository.sync_error = str(exc)
+        await db.commit()
+        await db.refresh(repository)
+        return RepositoryRead.model_validate(repository)
+
     job = await create_job(
         db,
         user_id=current_user.id,
@@ -378,6 +428,7 @@ async def create_remote_repository(
         repository_id=repository.id,
         kind="repository.created",
         label=f"Novo repositório · {repository.full_name}",
+        progress_total=1,
     )
     await db.commit()
     await db.refresh(repository)

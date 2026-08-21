@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
-import logging
+from typing import Any
+
 from sqlalchemy import delete, select
 from sqlalchemy.orm import joinedload
 
@@ -19,17 +21,17 @@ from app.models.github import (
     Repository,
     WorkflowRun,
 )
+from app.models.issue import Issue
 from app.services.github_client import GitHubClient
-from app.services.health import FAILURE_CONCLUSIONS, calculate_repository_health
 from app.services.github_mapping import (
     apply_repository_base,
     parse_github_datetime,
     workflow_duration_seconds,
 )
+from app.services.health import FAILURE_CONCLUSIONS, calculate_repository_health
 from app.services.notifications import create_notification
 
 logger = logging.getLogger(__name__)
-
 
 
 async def sync_connection(
@@ -38,6 +40,13 @@ async def sync_connection(
     selected_github_ids: set[int] | None = None,
     full_sync: bool = True,
 ) -> dict[str, int]:
+    """Descobre o catálogo e, quando solicitado, sincroniza os projetos monitorados.
+
+    Cada repositório usa seu próprio GitHubClient. Isso evita compartilhar o mapa de
+    warnings/permissões entre tasks concorrentes, que anteriormente podia fazer um
+    erro de um projeto contaminar o diagnóstico de outro.
+    """
+
     settings = get_settings()
     connection_uuid = uuid.UUID(str(connection_id))
 
@@ -55,8 +64,10 @@ async def sync_connection(
     repository_ids: list[uuid.UUID] = []
     errors = 0
     try:
-        async with GitHubClient(token, api_url=api_url) as client:
-            remote_repositories = await client.list_repositories(limit=settings.github_repository_limit)
+        async with GitHubClient(token, api_url=api_url) as discovery_client:
+            remote_repositories = await discovery_client.list_repositories(
+                limit=settings.github_repository_limit
+            )
             if selected_github_ids is not None:
                 remote_repositories = [
                     item for item in remote_repositories if int(item["id"]) in selected_github_ids
@@ -86,8 +97,8 @@ async def sync_connection(
 
                 connection.status = ConnectionStatus.ACTIVE
                 connection.last_error = None
-                connection.rate_limit_remaining = client.rate_limit_remaining
-                connection.rate_limit_reset_at = client.rate_limit_reset_at
+                connection.rate_limit_remaining = discovery_client.rate_limit_remaining
+                connection.rate_limit_reset_at = discovery_client.rate_limit_reset_at
 
             synced = 0
             if full_sync:
@@ -96,20 +107,8 @@ async def sync_connection(
                 async def sync_one(repository_id: uuid.UUID) -> bool:
                     nonlocal errors
                     async with semaphore:
-                        if (
-                            client.rate_limit_remaining is not None
-                            and client.rate_limit_remaining < 100
-                        ):
-                            logger.warning(
-                                "Repositório adiado por limite baixo do GitHub: "
-                                "connection=%s repository=%s remaining=%s",
-                                connection_uuid,
-                                repository_id,
-                                client.rate_limit_remaining,
-                            )
-                            return False
                         try:
-                            await sync_repository(repository_id, client=client)
+                            await sync_repository(repository_id)
                             return True
                         except Exception as exc:
                             errors += 1
@@ -129,8 +128,8 @@ async def sync_connection(
                 connection = await session.get(GitHubConnection, connection_uuid)
                 if connection:
                     connection.last_sync_at = datetime.now(UTC)
-                    connection.rate_limit_remaining = client.rate_limit_remaining
-                    connection.rate_limit_reset_at = client.rate_limit_reset_at
+                    connection.rate_limit_remaining = discovery_client.rate_limit_remaining
+                    connection.rate_limit_reset_at = discovery_client.rate_limit_reset_at
                     connection.last_error = (
                         f"{errors} repositório(s) apresentaram erro na sincronização."
                         if errors
@@ -150,6 +149,52 @@ async def sync_connection(
                 connection.status = ConnectionStatus.ERROR
                 connection.last_error = str(exc)[:4000]
         raise
+
+
+def _source_state(
+    warnings: dict[str, str],
+    key: str,
+    *,
+    count: int,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    warning = warnings.get(key)
+    return {
+        "observed": warning is None,
+        "count": count,
+        "error": warning,
+        "observed_at": datetime.now(UTC).isoformat(),
+        **(extra or {}),
+    }
+
+
+def _activity_candidate(
+    evidence: dict[str, dict[str, Any]],
+    source: str,
+    when: datetime | None,
+    summary: str,
+) -> None:
+    if when is None:
+        return
+    normalized = when if when.tzinfo else when.replace(tzinfo=UTC)
+    current = evidence.get(source)
+    current_at = parse_github_datetime(str(current.get("at") or "")) if current else None
+    if current_at is None or normalized > current_at:
+        evidence[source] = {"at": normalized.isoformat(), "summary": summary}
+
+
+def _latest_activity(
+    evidence: dict[str, dict[str, Any]],
+) -> tuple[str | None, datetime | None, str | None]:
+    candidates: list[tuple[datetime, str, str]] = []
+    for source, item in evidence.items():
+        when = parse_github_datetime(str(item.get("at") or ""))
+        if when:
+            candidates.append((when, source, str(item.get("summary") or source)))
+    if not candidates:
+        return None, None, None
+    when, source, summary = max(candidates, key=lambda item: item[0])
+    return source, when, summary
 
 
 async def sync_repository(
@@ -178,13 +223,24 @@ async def sync_repository(
         api_url = repository.connection.api_url
 
     github_client = client or GitHubClient(token, api_url=api_url)
+    github_client.optional_warnings.clear()
     try:
         remote_repo = await github_client.get_repository(full_name)
         commits = await github_client.list_commits(full_name, limit=1)
         branches = await github_client.list_branches(full_name, limit=100)
-        workflow_runs = await github_client.list_workflow_runs(full_name, limit=30)
+
+        # Actions/runs é a evidência principal. Só consulta a lista de workflows se
+        # não houver nenhuma execução, economizando uma chamada em quase todos os
+        # projetos que já possuem CI/CD ativo.
+        workflow_runs = await github_client.list_workflow_runs(full_name, limit=50)
+        workflows: list[dict[str, Any]] = []
+        if not workflow_runs and "actions_runs" not in github_client.optional_warnings:
+            workflows = await github_client.list_workflows(full_name, limit=100)
+
         pull_requests = await github_client.list_pull_requests(full_name, limit=100)
-        releases = await github_client.list_releases(full_name, limit=20)
+        issues = await github_client.list_issues(full_name, limit=100)
+        releases = await github_client.list_releases(full_name, limit=30)
+        warnings = dict(github_client.optional_warnings)
 
         async with session_scope() as session:
             result = await session.execute(
@@ -199,12 +255,15 @@ async def sync_repository(
             previous_workflow_id = repository.latest_workflow_id
             previous_workflow_conclusion = repository.latest_workflow_conclusion
             previous_release_tag = repository.latest_release_tag
+            previous_extra = repository.extra_data or {}
 
             apply_repository_base(repository, remote_repo)
             repository.branch_count = len(branches)
             repository.open_pr_count = len(pull_requests)
+            remote_open_total = int(remote_repo.get("open_issues_count") or 0)
             repository.open_issue_count = max(
-                int(remote_repo.get("open_issues_count") or 0) - repository.open_pr_count,
+                len(issues),
+                remote_open_total - repository.open_pr_count,
                 0,
             )
 
@@ -257,6 +316,11 @@ async def sync_repository(
             repository.sync_error = None
             repository.last_synced_at = datetime.now(UTC)
 
+            actions_observed = (
+                "actions_runs" not in warnings and "actions_workflows" not in warnings
+            )
+            workflow_count = len(workflows) if workflows else (1 if workflow_runs else 0)
+            ci_configured: bool | None = workflow_count > 0 if actions_observed else None
             health = calculate_repository_health(
                 archived=repository.archived,
                 disabled=repository.disabled,
@@ -266,12 +330,97 @@ async def sync_repository(
                 latest_workflow_conclusion=repository.latest_workflow_conclusion,
                 open_pr_count=repository.open_pr_count,
                 open_issue_count=repository.open_issue_count,
+                ci_configured=ci_configured,
             )
             repository.health_score = health.score
             repository.health_status = health.status
+
+            # Consolida atividade sem repetir chamadas de PR/Issue/Actions. Eventos
+            # de webhook preservados em repository_event também entram na análise.
+            old_evidence = previous_extra.get("activity_sources") or {}
+            evidence: dict[str, dict[str, Any]] = {}
+            if isinstance(old_evidence.get("repository_event"), dict):
+                evidence["repository_event"] = dict(old_evidence["repository_event"])
+
+            _activity_candidate(
+                evidence,
+                "push",
+                parse_github_datetime(remote_repo.get("pushed_at")),
+                "Último push informado pelo GitHub",
+            )
+            _activity_candidate(
+                evidence,
+                "commit",
+                repository.latest_commit_at,
+                f"Commit {str(repository.latest_commit_sha or '')[:8]} por {repository.latest_commit_author or 'autor desconhecido'}",
+            )
+            _activity_candidate(
+                evidence,
+                "actions",
+                repository.latest_workflow_at,
+                f"GitHub Actions: {repository.latest_workflow_name or 'workflow'}",
+            )
+            _activity_candidate(
+                evidence,
+                "release",
+                repository.latest_release_at,
+                f"Release {repository.latest_release_tag or ''}".strip(),
+            )
+            _activity_candidate(
+                evidence,
+                "repository_metadata",
+                parse_github_datetime(remote_repo.get("updated_at")),
+                "Metadados/configuração do repositório atualizados",
+            )
+            for item in pull_requests:
+                _activity_candidate(
+                    evidence,
+                    "pull_request",
+                    parse_github_datetime(item.get("updated_at")),
+                    f"PR #{item.get('number')} atualizado: {item.get('title') or 'sem título'}",
+                )
+            for item in issues:
+                _activity_candidate(
+                    evidence,
+                    "issue",
+                    parse_github_datetime(item.get("updated_at")),
+                    f"Issue #{item.get('number')} atualizada: {item.get('title') or 'sem título'}",
+                )
+
+            activity_type, activity_at, activity_summary = _latest_activity(evidence)
+            repository.last_activity_at = activity_at
+            repository.last_activity_type = activity_type
+            repository.last_activity_summary = activity_summary
+            repository.activity_observed_at = datetime.now(UTC)
+
             repository.extra_data = {
-                **(repository.extra_data or {}),
+                **previous_extra,
                 "health_reasons": list(health.reasons),
+                "health_components": health.components,
+                "health_coverage": health.coverage,
+                "activity_sources": evidence,
+                "activity_observed_at": repository.activity_observed_at.isoformat(),
+                "activity_warnings": warnings,
+                "sync_sources": {
+                    "commits": _source_state(warnings, "commits", count=len(commits)),
+                    "branches": _source_state(warnings, "branches", count=len(branches)),
+                    "actions": _source_state(
+                        warnings,
+                        "actions_runs" if "actions_runs" in warnings else "actions_workflows",
+                        count=len(workflow_runs),
+                        extra={
+                            "workflow_count": workflow_count,
+                            "run_count": len(workflow_runs),
+                            "observed": actions_observed,
+                            "error": warnings.get("actions_runs") or warnings.get("actions_workflows"),
+                        },
+                    ),
+                    "pull_requests": _source_state(
+                        warnings, "pull_requests", count=len(pull_requests)
+                    ),
+                    "issues": _source_state(warnings, "issues", count=len(issues)),
+                    "releases": _source_state(warnings, "releases", count=len(releases)),
+                },
             }
 
             await session.execute(
@@ -324,6 +473,31 @@ async def sync_repository(
                     )
                 )
 
+            await session.execute(delete(Issue).where(Issue.repository_id == repository.id))
+            for item in issues:
+                labels = [
+                    str(label.get("name") or "")
+                    for label in (item.get("labels") or [])
+                    if isinstance(label, dict) and label.get("name")
+                ]
+                session.add(
+                    Issue(
+                        repository_id=repository.id,
+                        github_id=int(item["id"]),
+                        number=int(item["number"]),
+                        title=str(item.get("title") or "Issue"),
+                        state=str(item.get("state") or "open"),
+                        html_url=str(item.get("html_url") or f"{repository.html_url}/issues"),
+                        user_login=(item.get("user") or {}).get("login"),
+                        comments=int(item.get("comments") or 0),
+                        locked=bool(item.get("locked", False)),
+                        labels_text=", ".join(labels) or None,
+                        github_created_at=parse_github_datetime(item.get("created_at")),
+                        github_updated_at=parse_github_datetime(item.get("updated_at")),
+                        closed_at=parse_github_datetime(item.get("closed_at")),
+                    )
+                )
+
             await session.execute(delete(Release).where(Release.repository_id == repository.id))
             for item in releases:
                 session.add(
@@ -367,7 +541,10 @@ async def sync_repository(
                         event_type="workflow.recovered",
                         severity=NotificationSeverity.SUCCESS,
                         title=f"Build recuperada: {repository.full_name}",
-                        message=f"{repository.latest_workflow_name or 'Workflow'} voltou a concluir com sucesso.",
+                        message=(
+                            f"{repository.latest_workflow_name or 'Workflow'} voltou a "
+                            "concluir com sucesso."
+                        ),
                         url=repository.latest_workflow_url,
                         payload={"run_id": repository.latest_workflow_id},
                     )
@@ -394,6 +571,13 @@ async def sync_repository(
             if repository:
                 repository.sync_error = str(exc)[:4000]
                 repository.last_synced_at = datetime.now(UTC)
+                source_data = (repository.extra_data or {}).get("sync_sources") or {}
+                actions_source = source_data.get("actions") or {}
+                ci_configured = (
+                    int(actions_source.get("workflow_count") or 0) > 0
+                    if actions_source.get("observed") is True
+                    else None
+                )
                 health = calculate_repository_health(
                     archived=repository.archived,
                     disabled=repository.disabled,
@@ -403,6 +587,7 @@ async def sync_repository(
                     latest_workflow_conclusion=repository.latest_workflow_conclusion,
                     open_pr_count=repository.open_pr_count,
                     open_issue_count=repository.open_issue_count,
+                    ci_configured=ci_configured,
                 )
                 repository.health_score = health.score
                 repository.health_status = health.status
