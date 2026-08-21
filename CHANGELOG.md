@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.5 — 2026-08-21
+
+- confirma por logs de produção que repositórios sob restrição legal podem recusar também o `DELETE` com HTTP 451;
+- mantém a exclusão remota bloqueada quando o GitHub retorna 451, sem tentar contornar a restrição;
+- adiciona ação explícita **Remover somente do Git Monitor** com confirmação forte `REMOVER DO MONITOR owner/repo`;
+- remove apenas o cadastro local e seus dados derivados, preservando o repositório remoto intacto;
+- grava auditoria da limpeza local e informa claramente que suporte do GitHub continua necessário para remover da conta;
+- adiciona atalho para o portal oficial de suporte do GitHub na tela de Conformidade;
+- diferencia visualmente exclusão remota de limpeza local para evitar a impressão de que um HTTP 451 foi resolvido no GitHub.
+
 ## 0.3.1 — 2026-08-21
 
 - remove `APP_VERSION` de todos os modelos de ambiente e Compose;
@@ -46,7 +56,7 @@
 - adiciona migração segura dos volumes nomeados das versões anteriores, preservando os volumes originais para rollback;
 - interrompe atualizações automáticas quando encontra volumes antigos ainda não migrados, evitando iniciar uma base vazia;
 - adiciona as pastas persistentes ao `.gitignore` e atualiza a documentação operacional;
-- sincroniza a versão 0.2.3 no backend, frontend, imagens, ambientes e stacks.
+- sincroniza a versão 0.2.3 no backend, frontend, imagens, ambientes, composes e documentação;
 
 ## 0.2.2 — 2026-08-20
 
@@ -78,24 +88,3 @@
 - dashboard reconstruído para reproduzir o contrato visual aprovado, com métricas, saúde segmentada, atividades recentes e tabela compacta de repositórios;
 - navegação desktop completa para Dashboard, Repositórios, Pull Requests, Actions, Releases, Issues, Alertas e Configurações;
 - experiência mobile-first com navegação inferior, painel “Mais”, lista de projetos e alerta crítico de build;
-- cabeçalho com usuário, contador de notificações e acesso ao GitHub;
-- páginas operacionais agregadas para Actions, PRs, Releases e Issues;
-- endpoints protegidos `/api/v1/operations/*` com escopo por usuário, filtros e paginação;
-- ações reais para cancelar e reexecutar workflows preservadas na nova interface;
-- nova identidade visual, componentes de métricas, donut de saúde e paginação reutilizável;
-- documentação, prévias visuais e validações atualizadas.
-
-## 0.1.0 — 2026-08-20
-
-### Entregue
-
-- API FastAPI com autenticação, refresh rotativo e senha Argon2.
-- Integração GitHub REST para repositórios, commits, branches, Actions, PRs e releases.
-- Token GitHub criptografado com Fernet.
-- Sincronização assíncrona e periódica via Celery, RabbitMQ e Redis.
-- Webhooks assinados e idempotentes.
-- Dashboard, saúde, alertas, filtros e operação de Actions.
-- PWA Vue 3/TypeScript mobile-first.
-- Docker Compose completo, migrations e bootstrap idempotente.
-- Scripts Windows/Linux, backup, restauração e publicação no GitHub.
-- CI, release GHCR, CodeQL e Dependabot.
