@@ -15,6 +15,10 @@ from app.tasks.celery_app import celery_app
 router = APIRouter(prefix="/jobs", tags=["Fila operacional"])
 
 
+def _status_value(value: str | SyncJobStatus) -> str:
+    return value.value if isinstance(value, SyncJobStatus) else str(value)
+
+
 @router.get("/overview", response_model=QueueOverview)
 async def queue_overview(current_user: CurrentUser, db: DbSession) -> QueueOverview:
     result = await db.execute(
@@ -22,7 +26,7 @@ async def queue_overview(current_user: CurrentUser, db: DbSession) -> QueueOverv
         .where(SyncJob.user_id == current_user.id)
         .group_by(SyncJob.status)
     )
-    counts = {str(status): int(count) for status, count in result.all()}
+    counts = {_status_value(status): int(count) for status, count in result.all()}
     queued = counts.get(SyncJobStatus.QUEUED.value, 0)
     running = counts.get(SyncJobStatus.RUNNING.value, 0)
     succeeded = counts.get(SyncJobStatus.SUCCESS.value, 0)
@@ -45,7 +49,7 @@ async def list_jobs(
 ) -> list[SyncJobRead]:
     query = select(SyncJob).where(SyncJob.user_id == current_user.id)
     if status_filter:
-        query = query.where(SyncJob.status == status_filter)
+        query = query.where(SyncJob.status == status_filter.value)
     result = await db.execute(query.order_by(SyncJob.created_at.desc()).limit(limit))
     return [SyncJobRead.model_validate(item) for item in result.scalars().all()]
 
@@ -69,7 +73,8 @@ async def cancel_job(job_id: uuid.UUID, current_user: CurrentUser, db: DbSession
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado.")
-    if job.status not in {SyncJobStatus.QUEUED, SyncJobStatus.RUNNING}:
+    current_status = _status_value(job.status)
+    if current_status not in {SyncJobStatus.QUEUED.value, SyncJobStatus.RUNNING.value}:
         raise HTTPException(status_code=400, detail="Somente jobs pendentes ou em execução podem ser cancelados.")
 
     if job.celery_task_id:
