@@ -17,10 +17,12 @@ class DashboardStats(BaseModel):
     attention: int
     failing: int
     unknown: int
-    health_evaluated: int
-    health_pending: int
+    # Métricas introduzidas na v0.4.0 possuem default para manter compatibilidade
+    # com fixtures/consumidores anteriores enquanto o backend sempre as preenche.
+    health_evaluated: int = 0
+    health_pending: int = 0
     average_health_score: int
-    average_health_coverage: int
+    average_health_coverage: int = 0
     open_pull_requests: int
     open_issues: int
     unread_notifications: int
