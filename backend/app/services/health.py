@@ -48,19 +48,18 @@ def calculate_repository_health(
     archived: bool,
     disabled: bool,
     sync_error: str | None,
-    last_synced_at: datetime | None,
     pushed_at: datetime | None,
     latest_workflow_status: str | None,
     latest_workflow_conclusion: str | None,
     open_pr_count: int,
     open_issue_count: int,
+    last_synced_at: datetime | None = None,
     now: datetime | None = None,
 ) -> HealthResult:
-    """Calcula saúde apenas com evidências observadas.
+    """Calcula saúde somente sobre evidências observadas.
 
-    O score é normalizado somente sobre componentes avaliados. A cobertura informa
-    quanto da política pôde ser medida. Um repositório ainda não sincronizado não
-    recebe um percentual artificial: fica UNKNOWN com score/coverage zero.
+    A cobertura informa quanto da política pôde ser avaliada. Um repositório sem
+    sincronização detalhada fica UNKNOWN e não recebe percentual artificial.
     """
 
     current_time = now or datetime.now(UTC)
@@ -76,7 +75,6 @@ def calculate_repository_health(
     reasons: list[str] = []
     components: dict[str, dict[str, Any]] = {}
 
-    # Disponibilidade do repositório — 20%
     availability_points = 20
     availability_detail = "Repositório disponível"
     if disabled:
@@ -94,7 +92,6 @@ def calculate_repository_health(
         detail=availability_detail,
     )
 
-    # Qualidade/frescor da sincronização — 25%
     synced = last_synced_at if last_synced_at.tzinfo else last_synced_at.replace(tzinfo=UTC)
     sync_age_minutes = max(int((current_time - synced).total_seconds() // 60), 0)
     if sync_error:
@@ -122,7 +119,6 @@ def calculate_repository_health(
         detail=sync_detail,
     )
 
-    # Atividade — 20%. Sem push é medido, mas não inventa data.
     if pushed_at is None:
         activity_points = 8
         activity_detail = "Nenhum push localizado"
@@ -151,8 +147,6 @@ def calculate_repository_health(
         detail=activity_detail,
     )
 
-    # CI/CD — 25%. Se o projeto não usa Actions, fica N/A e reduz cobertura;
-    # não derruba o score artificialmente.
     normalized_status = (latest_workflow_status or "").lower()
     normalized_conclusion = (latest_workflow_conclusion or "").lower()
     has_ci = bool(normalized_status or normalized_conclusion)
@@ -195,7 +189,6 @@ def calculate_repository_health(
             detail=f"Último workflow: {normalized_conclusion or normalized_status}",
         )
 
-    # Backlog — 10%
     backlog_points = 10
     backlog_notes: list[str] = []
     if open_pr_count >= 25:
