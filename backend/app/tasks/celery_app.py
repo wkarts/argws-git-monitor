@@ -17,7 +17,7 @@ celery_app = Celery(
     "argws_git_monitor",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.jobs", "app.tasks.inactivity"],
+    include=["app.tasks.jobs", "app.tasks.inactivity", "app.tasks.platform"],
 )
 celery_app.conf.update(
     task_serializer="json",
@@ -30,10 +30,10 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     worker_hijack_root_logger=False,
     broker_connection_retry_on_startup=True,
-    # RabbitMQ 4.3+ rejeita filas simultaneamente transitórias e não exclusivas.
-    # Celery/Kombu 5.6 expõe estas opções justamente para que as filas temporárias
-    # de pidbox/remote-control sejam exclusivas, evitando depender do recurso
-    # deprecated `transient_nonexcl_queues` do broker.
+    worker_cancel_long_running_tasks_on_connection_loss=True,
+    # RabbitMQ 4.x rejeita filas simultaneamente transitórias e não exclusivas.
+    # As filas temporárias de pidbox/eventos são exclusivas para não depender do
+    # recurso depreciado transient_nonexcl_queues.
     control_queue_exclusive=True,
     event_queue_exclusive=True,
     result_expires=3600,
@@ -45,6 +45,10 @@ celery_app.conf.update(
         "evaluate-inactivity-policies": {
             "task": "inactivity.evaluate_all",
             "schedule": 900.0,
+        },
+        "schedule-repository-backups": {
+            "task": "platform.schedule_backups",
+            "schedule": 300.0,
         },
         "cleanup-old-notifications": {
             "task": "notifications.cleanup",
