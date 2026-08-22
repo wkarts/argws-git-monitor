@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { Activity, Download, FlaskConical, Play, RefreshCw, Search, ShieldCheck, Trash2, TriangleAlert } from 'lucide-vue-next'
+import { Activity, Download, FlaskConical, RefreshCw, Search, ShieldCheck, Trash2, TriangleAlert } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { useToastStore } from '../stores/toast'
 import type { PaginatedResponse, Repository } from '../types/api'
