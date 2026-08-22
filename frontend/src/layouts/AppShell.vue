@@ -2,9 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
-  Activity, Bell, ChevronDown, ChevronLeft, ChevronRight, CircleDotDashed, FileText,
-  Github, GitPullRequest, LayoutDashboard, ListChecks, LogOut, Menu, MoreHorizontal,
-  PlayCircle, Settings, ShieldAlert, Tag, UserRound, Users, Wrench, X
+  Activity, Bell, ChevronDown, ChevronLeft, ChevronRight, CircleDotDashed,
+  ClipboardList, DatabaseBackup, FileText, Github, GitPullRequest, LayoutDashboard,
+  ListChecks, LogOut, Menu, MoreHorizontal, PlayCircle, Server, Settings,
+  ShieldAlert, Stethoscope, Tag, UserRound, Users, Wrench, X
 } from 'lucide-vue-next'
 import AppLogo from '../components/AppLogo.vue'
 import { api } from '../services/api'
@@ -35,10 +36,14 @@ const navItems = computed(() => [
   { to: '/releases', label: 'Releases', icon: Tag },
   { to: '/issues', label: 'Issues', icon: CircleDotDashed },
   { to: '/github-tools', label: 'GitHub Tools', icon: Wrench },
-  { to: '/compliance', label: 'Conformidade', icon: ShieldAlert },
+  { to: '/backup-recovery', label: 'Backup & Recovery', icon: DatabaseBackup },
+  { to: '/deployments', label: 'Deployments', icon: Server },
+  { to: '/repository-clinic', label: 'Repository Clinic', icon: Stethoscope },
   { to: '/inactivity', label: 'Inatividade', icon: Activity },
   { to: '/jobs', label: 'Fila', icon: ListChecks, badge: queueActive.value },
   { to: '/notifications', label: 'Alertas', icon: Bell, badge: unreadNotifications.value },
+  { to: '/compliance', label: 'Conformidade', icon: ShieldAlert },
+  { to: '/audit', label: 'Auditoria', icon: ClipboardList },
   ...(auth.user?.is_superuser ? [
     { to: '/users', label: 'Usuários', icon: Users },
     { to: '/logs', label: 'Logs', icon: FileText }
@@ -179,6 +184,7 @@ onBeforeUnmount(() => {
             <div v-if="userMenuOpen" class="user-menu-popover">
               <div class="user-menu-identity"><strong>{{auth.user?.name}}</strong><span>{{auth.user?.email}}</span><small>{{auth.user?.job_title || (auth.user?.is_superuser ? 'Administrador' : 'Usuário') }}</small></div>
               <RouterLink to="/profile"><UserRound :size="16" />Meu perfil</RouterLink>
+              <RouterLink to="/audit"><ClipboardList :size="16" />Auditoria</RouterLink>
               <RouterLink v-if="auth.user?.is_superuser" to="/users"><Users :size="16" />Usuários</RouterLink>
               <RouterLink v-if="auth.user?.is_superuser" to="/logs"><FileText :size="16" />Central de logs</RouterLink>
               <RouterLink to="/settings"><Settings :size="16" />Configurações</RouterLink>
@@ -203,9 +209,13 @@ onBeforeUnmount(() => {
         <RouterLink to="/releases"><Tag :size="19"/><span>Releases</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/issues"><CircleDotDashed :size="19"/><span>Issues</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/github-tools"><Wrench :size="19"/><span>GitHub Tools</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/backup-recovery"><DatabaseBackup :size="19"/><span>Backup & Recovery</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/deployments"><Server :size="19"/><span>Deployments</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/repository-clinic"><Stethoscope :size="19"/><span>Repository Clinic</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/compliance"><ShieldAlert :size="19"/><span>Conformidade</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/inactivity"><Activity :size="19"/><span>Inatividade</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/notifications"><Bell :size="19"/><span>Alertas</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/audit"><ClipboardList :size="19"/><span>Auditoria</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/profile"><UserRound :size="19"/><span>Meu perfil</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink v-if="auth.user?.is_superuser" to="/users"><Users :size="19"/><span>Usuários</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink v-if="auth.user?.is_superuser" to="/logs"><FileText :size="19"/><span>Logs</span><ChevronRight :size="16"/></RouterLink>

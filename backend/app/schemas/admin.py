@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+
+from app.core.permissions import normalize_permissions
 
 
 class AdminUserRead(BaseModel):
@@ -21,6 +23,7 @@ class AdminUserRead(BaseModel):
     locale: str = "pt-BR"
     avatar_updated_at: datetime | None = None
     avatar_url: str | None = None
+    permissions: list[str] = Field(default_factory=list)
     github_connection_count: int = 0
     repository_count: int = 0
     active_session_count: int = 0
@@ -42,6 +45,12 @@ class AdminUserCreate(BaseModel):
     is_superuser: bool = False
     must_change_password: bool = True
     job_title: str | None = Field(default=None, max_length=160)
+    permissions: list[str] = Field(default_factory=list)
+
+    @field_validator("permissions")
+    @classmethod
+    def validate_permissions(cls, value: list[str]) -> list[str]:
+        return normalize_permissions(value)
 
 
 class AdminUserUpdate(BaseModel):
@@ -51,6 +60,12 @@ class AdminUserUpdate(BaseModel):
     is_superuser: bool | None = None
     must_change_password: bool | None = None
     job_title: str | None = Field(default=None, max_length=160)
+    permissions: list[str] | None = None
+
+    @field_validator("permissions")
+    @classmethod
+    def validate_permissions(cls, value: list[str] | None) -> list[str] | None:
+        return normalize_permissions(value) if value is not None else None
 
 
 class AdminPasswordResetResponse(BaseModel):

@@ -8,8 +8,23 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        git-lfs \
+        openssh-client \
+        rsync \
+        tar \
+        gzip \
+    && git lfs install --system \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 10001 app \
-    && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app
+    && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /data/backups /data/work \
+    && chown -R app:app /data
 
 COPY pyproject.toml README.md ./
 COPY app ./app
