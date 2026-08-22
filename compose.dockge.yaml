@@ -1,7 +1,7 @@
 name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
 # Compatibilidade na raiz. Os pacotes separados e documentados ficam em deploy/.
-# Imagens sempre :latest; dados e logs persistem em ./data-*.
+# Imagens sempre :latest; dados, backups e logs persistem em ./data-*.
 
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
@@ -39,6 +39,7 @@ x-api-service: &api-service
   environment: *app-environment
   volumes:
     - ./data-logs:/var/log/argws-stack
+    - ./data-backups:/data/backups
   networks: [gitmonitor]
   security_opt: ["no-new-privileges:true"]
   init: true
@@ -55,9 +56,13 @@ services:
         for dir in api worker beat migrate web postgres redis rabbitmq; do
           mkdir -p "/logs/$dir"
         done
+        mkdir -p /backups
         chmod -R a+rwx /logs
+        chown -R 10001:10001 /backups
+        chmod -R u+rwX,go-rwx /backups
     volumes:
       - ./data-logs:/logs
+      - ./data-backups:/backups
     security_opt: ["no-new-privileges:true"]
 
   postgres:
