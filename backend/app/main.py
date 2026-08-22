@@ -19,11 +19,13 @@ from app.api.routes import (
     github,
     github_diagnostics,
     github_tools,
+    github_tools_v2,
     inactivity,
     jobs,
     logs,
     notifications,
     operations,
+    platform,
     repositories,
     system,
     webhooks,
@@ -64,7 +66,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="Central mobile-first de monitoramento e operação de repositórios GitHub.",
+    description="Central operacional de monitoramento, proteção, backup, release, manutenção e deployment de repositórios GitHub.",
     default_response_class=ORJSONResponse,
     docs_url=f"{settings.api_v1_prefix}/docs",
     redoc_url=f"{settings.api_v1_prefix}/redoc",
@@ -120,10 +122,12 @@ app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
 app.include_router(github.router, prefix=settings.api_v1_prefix)
 app.include_router(github_diagnostics.router, prefix=settings.api_v1_prefix)
 app.include_router(github_tools.router, prefix=settings.api_v1_prefix)
+app.include_router(github_tools_v2.router, prefix=settings.api_v1_prefix)
 app.include_router(compliance_local.router, prefix=settings.api_v1_prefix)
 app.include_router(inactivity.router, prefix=settings.api_v1_prefix)
 app.include_router(jobs.router, prefix=settings.api_v1_prefix)
 app.include_router(repositories.router, prefix=settings.api_v1_prefix)
 app.include_router(operations.router, prefix=settings.api_v1_prefix)
+app.include_router(platform.router, prefix=settings.api_v1_prefix)
 app.include_router(notifications.router, prefix=settings.api_v1_prefix)
 app.include_router(webhooks.router, prefix=settings.api_v1_prefix)
