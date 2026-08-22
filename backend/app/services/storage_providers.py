@@ -12,6 +12,7 @@ import httpx
 
 from app.models.platform import StorageProvider
 from app.services.secret_store import SecretStore
+from app.services.ssh_security import configure_ssh_host_keys
 
 
 class StorageProviderError(RuntimeError):
@@ -123,7 +124,11 @@ class DropboxStorageAdapter(StorageAdapter):
             raise StorageProviderError("access_token do Dropbox é obrigatório.")
 
     def test(self) -> dict[str, Any]:
-        response = httpx.post("https://api.dropboxapi.com/2/users/get_current_account", headers={"Authorization": f"Bearer {self.token}"}, timeout=30)
+        response = httpx.post(
+            "https://api.dropboxapi.com/2/users/get_current_account",
+            headers={"Authorization": f"Bearer {self.token}"},
+            timeout=30,
+        )
         response.raise_for_status()
         return {"account_id": response.json().get("account_id"), "ok": True}
 
@@ -131,15 +136,27 @@ class DropboxStorageAdapter(StorageAdapter):
         path = f"{self.base}/{remote_key}".replace("//", "/")
         response = httpx.post(
             "https://content.dropboxapi.com/2/files/upload",
-            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/octet-stream", "Dropbox-API-Arg": json.dumps({"path": path, "mode": "overwrite"})},
-            content=local_path.read_bytes(), timeout=300,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/octet-stream",
+                "Dropbox-API-Arg": json.dumps({"path": path, "mode": "overwrite"}),
+            },
+            content=local_path.read_bytes(),
+            timeout=300,
         )
         response.raise_for_status()
         return f"dropbox:{path}"
 
     def download(self, location: str, local_path: Path) -> Path:
         path = location.removeprefix("dropbox:")
-        response = httpx.post("https://content.dropboxapi.com/2/files/download", headers={"Authorization": f"Bearer {self.token}", "Dropbox-API-Arg": json.dumps({"path": path})}, timeout=300)
+        response = httpx.post(
+            "https://content.dropboxapi.com/2/files/download",
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Dropbox-API-Arg": json.dumps({"path": path}),
+            },
+            timeout=300,
+        )
         response.raise_for_status()
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_bytes(response.content)
@@ -147,7 +164,15 @@ class DropboxStorageAdapter(StorageAdapter):
 
     def delete(self, location: str) -> None:
         path = location.removeprefix("dropbox:")
-        response = httpx.post("https://api.dropboxapi.com/2/files/delete_v2", headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}, json={"path": path}, timeout=30)
+        response = httpx.post(
+            "https://api.dropboxapi.com/2/files/delete_v2",
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            },
+            json={"path": path},
+            timeout=30,
+        )
         response.raise_for_status()
 
 
@@ -162,7 +187,12 @@ class GoogleDriveStorageAdapter(StorageAdapter):
         return {"Authorization": f"Bearer {self.token}"}
 
     def test(self) -> dict[str, Any]:
-        response = httpx.get("https://www.googleapis.com/drive/v3/about", headers=self._headers(), params={"fields": "user,storageQuota"}, timeout=30)
+        response = httpx.get(
+            "https://www.googleapis.com/drive/v3/about",
+            headers=self._headers(),
+            params={"fields": "user,storageQuota"},
+            timeout=30,
+        )
         response.raise_for_status()
         return {"user": response.json().get("user"), "ok": True}
 
@@ -172,18 +202,33 @@ class GoogleDriveStorageAdapter(StorageAdapter):
             metadata["parents"] = [self.folder_id]
         boundary = "argws_boundary_7cfc6d"
         body = io.BytesIO()
-        body.write(f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode())
+        body.write(
+            f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode()
+        )
         body.write(json.dumps(metadata).encode())
-        body.write(f"\r\n--{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n".encode())
+        body.write(
+            f"\r\n--{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
+        )
         body.write(local_path.read_bytes())
         body.write(f"\r\n--{boundary}--\r\n".encode())
-        response = httpx.post("https://www.googleapis.com/upload/drive/v3/files", headers={**self._headers(), "Content-Type": f"multipart/related; boundary={boundary}"}, params={"uploadType": "multipart", "fields": "id,name,size,md5Checksum"}, content=body.getvalue(), timeout=300)
+        response = httpx.post(
+            "https://www.googleapis.com/upload/drive/v3/files",
+            headers={**self._headers(), "Content-Type": f"multipart/related; boundary={boundary}"},
+            params={"uploadType": "multipart", "fields": "id,name,size,md5Checksum"},
+            content=body.getvalue(),
+            timeout=300,
+        )
         response.raise_for_status()
         return f"gdrive:{response.json()['id']}"
 
     def download(self, location: str, local_path: Path) -> Path:
         file_id = location.removeprefix("gdrive:")
-        response = httpx.get(f"https://www.googleapis.com/drive/v3/files/{file_id}", headers=self._headers(), params={"alt": "media"}, timeout=300)
+        response = httpx.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers=self._headers(),
+            params={"alt": "media"},
+            timeout=300,
+        )
         response.raise_for_status()
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_bytes(response.content)
@@ -191,7 +236,11 @@ class GoogleDriveStorageAdapter(StorageAdapter):
 
     def delete(self, location: str) -> None:
         file_id = location.removeprefix("gdrive:")
-        response = httpx.delete(f"https://www.googleapis.com/drive/v3/files/{file_id}", headers=self._headers(), timeout=30)
+        response = httpx.delete(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers=self._headers(),
+            timeout=30,
+        )
         response.raise_for_status()
 
 
@@ -202,6 +251,8 @@ class SFTPStorageAdapter(StorageAdapter):
         except ImportError as exc:
             raise StorageProviderError("paramiko não está instalado na imagem do worker.") from exc
         self.paramiko = paramiko
+        self.config = dict(config or {})
+        self.secret = dict(secret or {})
         self.host = str(config.get("host") or "")
         self.port = int(config.get("port") or 22)
         self.username = str(config.get("username") or secret.get("username") or "")
@@ -209,23 +260,41 @@ class SFTPStorageAdapter(StorageAdapter):
         self.password = secret.get("password")
         self.private_key = secret.get("private_key")
         self.private_key_password = secret.get("private_key_password")
-        self.known_hosts_file = str(config.get("known_hosts_file") or "").strip()
-        self.allow_unknown_host_key = bool(config.get("allow_unknown_host_key", False))
         if not self.host or not self.username:
             raise StorageProviderError("host e username são obrigatórios.")
 
     def _connect(self):
         client = self.paramiko.SSHClient()
-        client.load_system_host_keys()
-        if self.known_hosts_file:
-            client.load_host_keys(self.known_hosts_file)
-        client.set_missing_host_key_policy(self.paramiko.AutoAddPolicy() if self.allow_unknown_host_key else self.paramiko.RejectPolicy())
-        kwargs: dict[str, Any] = {"hostname": self.host, "port": self.port, "username": self.username, "timeout": 20, "banner_timeout": 20, "auth_timeout": 20}
+        configure_ssh_host_keys(
+            client,
+            self.paramiko,
+            config=self.config,
+            secret=self.secret,
+            error_type=StorageProviderError,
+        )
+        kwargs: dict[str, Any] = {
+            "hostname": self.host,
+            "port": self.port,
+            "username": self.username,
+            "timeout": 20,
+            "banner_timeout": 20,
+            "auth_timeout": 20,
+        }
         if self.private_key:
-            kwargs["pkey"] = self.paramiko.RSAKey.from_private_key(io.StringIO(str(self.private_key)), password=self.private_key_password)
+            kwargs["pkey"] = self.paramiko.RSAKey.from_private_key(
+                io.StringIO(str(self.private_key)),
+                password=self.private_key_password,
+            )
         else:
             kwargs["password"] = str(self.password or "")
-        client.connect(**kwargs)
+        try:
+            client.connect(**kwargs)
+        except self.paramiko.BadHostKeyException as exc:
+            raise StorageProviderError(
+                "A chave SSH apresentada pelo servidor não corresponde ao known_hosts."
+            ) from exc
+        except self.paramiko.SSHException as exc:
+            raise StorageProviderError("Não foi possível estabelecer uma sessão SFTP validada.") from exc
         return client
 
     def _mkdirs(self, sftp, path: str) -> None:
@@ -240,7 +309,9 @@ class SFTPStorageAdapter(StorageAdapter):
     def test(self) -> dict[str, Any]:
         client = self._connect()
         try:
-            sftp = client.open_sftp(); self._mkdirs(sftp, self.base); sftp.close()
+            sftp = client.open_sftp()
+            self._mkdirs(sftp, self.base)
+            sftp.close()
             return {"host": self.host, "base_path": self.base, "ok": True}
         finally:
             client.close()
@@ -249,7 +320,10 @@ class SFTPStorageAdapter(StorageAdapter):
         remote = f"{self.base}/{remote_key}".replace("//", "/")
         client = self._connect()
         try:
-            sftp = client.open_sftp(); self._mkdirs(sftp, remote.rsplit("/", 1)[0]); sftp.put(str(local_path), remote); sftp.close()
+            sftp = client.open_sftp()
+            self._mkdirs(sftp, remote.rsplit("/", 1)[0])
+            sftp.put(str(local_path), remote)
+            sftp.close()
             return f"sftp://{self.host}:{self.port}{remote}"
         finally:
             client.close()
@@ -258,7 +332,11 @@ class SFTPStorageAdapter(StorageAdapter):
         remote = location.removeprefix(f"sftp://{self.host}:{self.port}")
         client = self._connect()
         try:
-            sftp = client.open_sftp(); local_path.parent.mkdir(parents=True, exist_ok=True); sftp.get(remote, str(local_path)); sftp.close(); return local_path
+            sftp = client.open_sftp()
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            sftp.get(remote, str(local_path))
+            sftp.close()
+            return local_path
         finally:
             client.close()
 
@@ -266,17 +344,25 @@ class SFTPStorageAdapter(StorageAdapter):
         remote = location.removeprefix(f"sftp://{self.host}:{self.port}")
         client = self._connect()
         try:
-            sftp = client.open_sftp(); sftp.remove(remote); sftp.close()
+            sftp = client.open_sftp()
+            sftp.remove(remote)
+            sftp.close()
         finally:
             client.close()
 
 
 def build_storage_adapter(provider: StorageProvider) -> StorageAdapter:
     secret = SecretStore().decrypt_dict(provider.secret_encrypted)
-    if provider.kind == "local": return LocalStorageAdapter(provider.config)
-    if provider.kind == "s3": return S3StorageAdapter(provider.config, secret)
-    if provider.kind == "minio": return S3StorageAdapter(provider.config, secret, minio=True)
-    if provider.kind == "dropbox": return DropboxStorageAdapter(provider.config, secret)
-    if provider.kind == "google_drive": return GoogleDriveStorageAdapter(provider.config, secret)
-    if provider.kind == "sftp": return SFTPStorageAdapter(provider.config, secret)
+    if provider.kind == "local":
+        return LocalStorageAdapter(provider.config)
+    if provider.kind == "s3":
+        return S3StorageAdapter(provider.config, secret)
+    if provider.kind == "minio":
+        return S3StorageAdapter(provider.config, secret, minio=True)
+    if provider.kind == "dropbox":
+        return DropboxStorageAdapter(provider.config, secret)
+    if provider.kind == "google_drive":
+        return GoogleDriveStorageAdapter(provider.config, secret)
+    if provider.kind == "sftp":
+        return SFTPStorageAdapter(provider.config, secret)
     raise StorageProviderError(f"Provider não suportado: {provider.kind}")
