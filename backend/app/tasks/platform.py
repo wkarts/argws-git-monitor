@@ -9,12 +9,7 @@ from sqlalchemy import select
 
 from app.core.database import dispose_engine, session_scope
 from app.models.activity import SyncJob
-from app.models.platform import (
-    BackupPolicy,
-    BackupSnapshot,
-    CleanupAnalysis,
-    DeploymentRecord,
-)
+from app.models.platform import BackupPolicy
 from app.services.backup_service import apply_retention, create_backup
 from app.services.cleanup_service import (
     build_cleanup_analysis,
