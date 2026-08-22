@@ -47,7 +47,7 @@ async def _resolve_checkpoint(client:GitHubClient,repository:Repository,requeste
     return {**checkpoint,"branch":branch,"tag":tag or None,"sha":str((commit or {}).get("sha") or sha),"resolved_at":datetime.now(UTC).isoformat()}
 
 def _candidate(resource_type:str,key:str,resource_id:Any,action_class:str,reason:str,*,metadata:dict[str,Any]|None=None,size:int|None=None,dependencies:list[dict[str,Any]]|None=None,protected:bool=False)->dict[str,Any]:
-    return {"resource_type":resource_type,"resource_key":key,"resource_id":str(resource_id) if resource_id is not None else None,"action_class":action_class,"reason":reason,"metadata":metadata or {},"size_bytes":size,"dependencies":dependencies or [],"protected":protected,"selected":False}
+    return {"resource_type":resource_type,"resource_key":key,"resource_id":str(resource_id) if resource_id is not None else None,"action_class":action_class,"reason":reason,"resource_metadata":metadata or {},"size_bytes":size,"dependencies":dependencies or [],"protected":protected,"selected":False}
 
 async def build_cleanup_analysis(session:AsyncSession,*,user_id:uuid.UUID,repository_id:uuid.UUID,profile_id:uuid.UUID|None=None,criteria:dict[str,Any]|None=None,preservation_rules:dict[str,Any]|None=None,canonical_checkpoint:dict[str,Any]|None=None,job_id:uuid.UUID|None=None)->CleanupAnalysis:
     repository=await session.get(Repository,repository_id)
@@ -185,7 +185,7 @@ async def dry_run_cleanup(session:AsyncSession,*,user_id:uuid.UUID,analysis_id:u
                 elif item.resource_type=="release": await client.get_json(f"/repos/{repository.full_name}/releases/{item.resource_id}")
                 elif item.resource_type=="branch": await client.get_json(f"/repos/{repository.full_name}/branches/{quote(item.resource_id or '',safe='')}")
                 elif item.resource_type=="ghcr_version":
-                    versions=await GitHubManagementService(client).package_versions(owner=repository.owner,package_name=str(item.metadata.get("package_name") or ""),authenticated_login=connection.github_login,limit=500)
+                    versions=await GitHubManagementService(client).package_versions(owner=repository.owner,package_name=str(item.resource_metadata.get("package_name") or ""),authenticated_login=connection.github_login,limit=500)
                     if not any(str(x.get("id"))==str(item.resource_id) for x in versions): raise CleanupError("GHCR version não existe mais.")
                 valid+=1
             except Exception as exc: conflicts.append({"candidate_id":str(item.id),"resource":item.resource_key,"reason":"resource_changed_or_missing","error":str(exc)[:500]})
@@ -239,7 +239,7 @@ async def execute_cleanup(session:AsyncSession,*,user_id:uuid.UUID,analysis_id:u
                 elif item.resource_type=="release": await client.request("DELETE",f"/repos/{repository.full_name}/releases/{item.resource_id}")
                 elif item.resource_type=="tag": await client.request("DELETE",f"/repos/{repository.full_name}/git/refs/tags/{quote(item.resource_id or '',safe='')}")
                 elif item.resource_type=="actions_cache": await client.request("DELETE",f"/repos/{repository.full_name}/actions/caches/{item.resource_id}")
-                elif item.resource_type=="ghcr_version": await management.delete_package_version(owner=repository.owner,package_name=str(item.metadata.get("package_name") or ""),version_id=int(item.resource_id or 0),authenticated_login=connection.github_login)
+                elif item.resource_type=="ghcr_version": await management.delete_package_version(owner=repository.owner,package_name=str(item.resource_metadata.get("package_name") or ""),version_id=int(item.resource_id or 0),authenticated_login=connection.github_login)
                 elif item.resource_type=="branch": await client.request("DELETE",f"/repos/{repository.full_name}/git/refs/heads/{quote(item.resource_id or '',safe='')}")
                 report["deleted"][item.resource_type]+=1
             except Exception as exc: report["failed"].append({"candidate_id":str(item.id),"resource":item.resource_key,"error":str(exc)[:1000]})
