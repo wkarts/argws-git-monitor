@@ -307,7 +307,7 @@ class CleanupCandidateRead(BaseModel):
     protected: bool
     selected: bool
     size_bytes: int | None
-    metadata: dict[str, Any]
+    metadata: dict[str, Any] = Field(validation_alias="resource_metadata")
     model_config = {"from_attributes": True}
 
 
