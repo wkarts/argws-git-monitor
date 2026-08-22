@@ -1,5 +1,6 @@
 from app.api.routes import (
     admin,
+    admin_permissions,
     auth,
     compliance_local,
     dashboard,
@@ -20,6 +21,7 @@ from app.api.routes import (
 
 __all__ = [
     "admin",
+    "admin_permissions",
     "auth",
     "compliance_local",
     "dashboard",
