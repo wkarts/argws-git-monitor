@@ -33,6 +33,7 @@ from app.api.routes import (
 from app.core.config import get_settings
 from app.core.database import dispose_engine
 from app.core.logging import configure_logging
+from app.core.request_context import reset_request_id, set_request_id
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -66,7 +67,10 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="Central operacional de monitoramento, proteção, backup, release, manutenção e deployment de repositórios GitHub.",
+    description=(
+        "Central operacional de monitoramento, proteção, backup, release, "
+        "manutenção e deployment de repositórios GitHub."
+    ),
     default_response_class=ORJSONResponse,
     docs_url=f"{settings.api_v1_prefix}/docs",
     redoc_url=f"{settings.api_v1_prefix}/redoc",
@@ -80,23 +84,28 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "X-Request-ID"],
 )
 
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    context_token = set_request_id(request_id)
     started = time.perf_counter()
-    response = await call_next(request)
-    route = getattr(request.scope.get("route"), "path", request.url.path)
-    elapsed = time.perf_counter() - started
-    REQUEST_COUNT.labels(request.method, route, str(response.status_code)).inc()
-    REQUEST_LATENCY.labels(request.method, route).observe(elapsed)
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    return response
+    try:
+        response = await call_next(request)
+        route = getattr(request.scope.get("route"), "path", request.url.path)
+        elapsed = time.perf_counter() - started
+        REQUEST_COUNT.labels(request.method, route, str(response.status_code)).inc()
+        REQUEST_LATENCY.labels(request.method, route).observe(elapsed)
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+    finally:
+        reset_request_id(context_token)
 
 
 @app.get("/api", include_in_schema=False)
