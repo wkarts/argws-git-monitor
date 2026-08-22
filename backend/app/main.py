@@ -13,6 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_
 
 from app.api.routes import (
     admin,
+    admin_permissions,
     auth,
     compliance_local,
     dashboard,
@@ -126,6 +127,7 @@ async def metrics() -> Response:
 app.include_router(system.router, prefix=settings.api_v1_prefix)
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(admin.router, prefix=settings.api_v1_prefix)
+app.include_router(admin_permissions.router, prefix=settings.api_v1_prefix)
 app.include_router(logs.router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard.router, prefix=settings.api_v1_prefix)
 app.include_router(github.router, prefix=settings.api_v1_prefix)
