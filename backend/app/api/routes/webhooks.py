@@ -11,9 +11,11 @@ from app.api.deps import DbSession
 from app.core.config import get_settings
 from app.models.activity import SyncJobStatus, WebhookDelivery
 from app.models.github import GitHubConnection, Repository
+from app.models.platform import BackupPolicy
 from app.services.job_queue import create_job
 from app.services.webhook_security import verify_github_signature
 from app.tasks.jobs import sync_repository_task
+from app.tasks.platform import backup_task
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
@@ -37,7 +39,10 @@ def _event_summary(event: str, payload: dict) -> str:
         return f"PR #{pull.get('number') or payload.get('number')} · {action or 'atualizada'}"
     if event == "workflow_run":
         run = payload.get("workflow_run") or {}
-        return f"Actions · {run.get('name') or 'workflow'} · {run.get('conclusion') or run.get('status') or action or 'atualizado'}"
+        return (
+            f"Actions · {run.get('name') or 'workflow'} · "
+            f"{run.get('conclusion') or run.get('status') or action or 'atualizado'}"
+        )
     if event == "release":
         release = payload.get("release") or {}
         return f"Release {release.get('tag_name') or ''} · {action or 'atualizada'}".strip()
@@ -45,6 +50,22 @@ def _event_summary(event: str, payload: dict) -> str:
         issue = payload.get("issue") or {}
         return f"Issue #{issue.get('number') or payload.get('number')} · {action or 'atualizada'}"
     return f"Evento GitHub {event} · {action or 'recebido'}"
+
+
+def _backup_trigger_for_event(event: str, payload: dict) -> str | None:
+    if event == "push":
+        return "push"
+    if event == "release" and payload.get("action") in {
+        "published",
+        "released",
+        "created",
+    }:
+        return "release"
+    if event == "workflow_run":
+        run = payload.get("workflow_run") or {}
+        if run.get("status") == "completed" and run.get("conclusion") == "success":
+            return "workflow_success"
+    return None
 
 
 @router.post("/github", status_code=status.HTTP_202_ACCEPTED)
@@ -68,7 +89,7 @@ async def github_webhook(request: Request, db: DbSession):
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Payload JSON inválido.") from exc
 
-    full_name = ((payload.get("repository") or {}).get("full_name"))
+    full_name = (payload.get("repository") or {}).get("full_name")
     now = datetime.now(UTC)
     delivery = WebhookDelivery(
         delivery_id=delivery_id,
@@ -82,7 +103,8 @@ async def github_webhook(request: Request, db: DbSession):
     )
     db.add(delivery)
 
-    queued_jobs: list[tuple[Repository, object]] = []
+    sync_jobs: list[tuple[Repository, object]] = []
+    backup_jobs: list[tuple[BackupPolicy, Repository, object]] = []
     if full_name and event in EVENT_SOURCE:
         result = await db.execute(
             select(Repository, GitHubConnection.user_id)
@@ -94,6 +116,8 @@ async def github_webhook(request: Request, db: DbSession):
         )
         source = EVENT_SOURCE[event]
         summary = _event_summary(event, payload)
+        backup_trigger = _backup_trigger_for_event(event, payload)
+
         for repository, user_id in result.all():
             evidence = dict((repository.extra_data or {}).get("activity_sources") or {})
             item = {"at": now.isoformat(), "summary": summary}
@@ -122,15 +146,44 @@ async def github_webhook(request: Request, db: DbSession):
                 progress_total=1,
                 message="Evento recebido; aguardando atualização detalhada.",
             )
-            queued_jobs.append((repository, job))
+            sync_jobs.append((repository, job))
 
-    # Persiste primeiro a entrega e a atividade. Se o broker estiver indisponível,
-    # o evento não é perdido e o job fica visível para retry/reconciliação.
+            if backup_trigger:
+                policies = (
+                    await db.execute(
+                        select(BackupPolicy).where(
+                            BackupPolicy.user_id == user_id,
+                            BackupPolicy.repository_id == repository.id,
+                            BackupPolicy.enabled.is_(True),
+                            BackupPolicy.schedule_kind == "event",
+                            BackupPolicy.event_trigger == backup_trigger,
+                        )
+                    )
+                ).scalars().all()
+                for policy in policies:
+                    backup_job = await create_job(
+                        db,
+                        user_id=user_id,
+                        connection_id=repository.connection_id,
+                        repository_id=repository.id,
+                        kind=f"repository.backup.event.{backup_trigger}",
+                        label=f"Backup por evento · {policy.name} · {repository.full_name}",
+                        progress_total=5,
+                        message=(
+                            f"Evento {backup_trigger} recebido; backup aguardando worker."
+                        ),
+                    )
+                    backup_jobs.append((policy, repository, backup_job))
+
+    # Persiste primeiro entrega, atividade e jobs. Se o broker estiver indisponível,
+    # o evento não se perde e o histórico mostra a falha de enfileiramento.
     await db.commit()
 
     queued = 0
     failed = 0
-    for repository, job in queued_jobs:
+    backup_queued = 0
+    backup_failed = 0
+    for repository, job in sync_jobs:
         try:
             task = sync_repository_task.delay(str(repository.id), str(job.id))
             job.celery_task_id = task.id
@@ -141,7 +194,28 @@ async def github_webhook(request: Request, db: DbSession):
             job.message = "Evento registrado, mas o processamento detalhado não iniciou."
             job.completed_at = datetime.now(UTC)
             failed += 1
-    if queued_jobs:
+
+    for policy, repository, job in backup_jobs:
+        try:
+            task = backup_task.delay(
+                str(job.id),
+                {
+                    "user_id": str(policy.user_id),
+                    "policy_id": str(policy.id),
+                    "event_delivery_id": delivery_id,
+                    "event_repository": repository.full_name,
+                },
+            )
+            job.celery_task_id = task.id
+            backup_queued += 1
+        except Exception as exc:
+            job.status = SyncJobStatus.FAILED
+            job.error = f"Falha ao enviar backup por evento ao worker: {exc}"[:4000]
+            job.message = "Evento registrado, mas o backup automático não iniciou."
+            job.completed_at = datetime.now(UTC)
+            backup_failed += 1
+
+    if sync_jobs or backup_jobs:
         await db.commit()
 
     return {
@@ -149,4 +223,6 @@ async def github_webhook(request: Request, db: DbSession):
         "delivery_id": delivery_id,
         "queued": queued,
         "failed": failed,
+        "backup_queued": backup_queued,
+        "backup_failed": backup_failed,
     }
