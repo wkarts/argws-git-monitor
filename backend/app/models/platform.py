@@ -384,4 +384,9 @@ class CleanupCandidate(UUIDPrimaryKeyMixin, Base):
     protected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     selected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    # `metadata` é reservado pela API declarativa do SQLAlchemy. Mantemos o
+    # nome físico da coluna para compatibilidade da migration/DB, mas usamos um
+    # atributo Python seguro.
+    resource_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSON, default=dict, nullable=False
+    )
