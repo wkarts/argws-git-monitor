@@ -1,280 +1,134 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import {
-  Boxes, FileCode2, GitBranch, GitFork, Package, Play, RefreshCw, Rocket, Save,
-  Search, Tag, Trash2, UploadCloud
+  Boxes, FileCode2, GitBranch, GitCompare, GitFork, Package, Play, RefreshCw,
+  Rocket, Save, Search, ShieldCheck, Tag, Trash2, UploadCloud, Wrench
 } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { useToastStore } from '../stores/toast'
-import type {
-  GitHubConnection, GitHubTreeItem, PackageVersion, PaginatedResponse, Repository, ToolResult
-} from '../types/api'
+import type { GitHubConnection, GitHubTreeItem, PackageVersion, PaginatedResponse, Repository, ToolResult } from '../types/api'
 
-const toasts = useToastStore()
-const loading = ref(true)
-const busy = ref('')
-const connections = ref<GitHubConnection[]>([])
-const repositories = ref<Repository[]>([])
-const tree = ref<GitHubTreeItem[]>([])
-const packageVersions = ref<PackageVersion[]>([])
-const selectedConnectionId = ref('')
-const selectedRepositoryId = ref('')
-const repositoryQuery = ref('')
+type Tab='repositories'|'branches'|'releases'|'ghcr'|'cleanup'
+interface BranchItem { name:string; sha:string|null; protected:boolean; default:boolean }
+interface BootstrapFile { path:string; status:string; existing_sha:string|null; diff:string; content:string; action?:'keep'|'replace' }
+interface BootstrapPreview { repository:string; branch:string; files:BootstrapFile[] }
+interface ActionsData { workflows:Array<Record<string,unknown>>; runs:Array<Record<string,unknown>>; artifacts:Array<Record<string,unknown>>; caches:Array<Record<string,unknown>> }
+interface PublishingChannel { id:string; name:string; kind:string; enabled:boolean }
+interface GhcrPackage { id?:number; name?:string; package_type?:string; visibility?:string; html_url?:string; created_at?:string; updated_at?:string }
+interface GhcrDetail { package:GhcrPackage|null; versions:PackageVersion[]; version_count:number; tag_count:number }
+interface CleanupCandidate { id:string; resource_type:string; resource_key:string; action_class:string; reason:string; protected:boolean; selected:boolean; size_bytes:number|null }
+interface CleanupAnalysis { id:string; reference:string; status:string; estimated_reclaimed_bytes:number; checkpoint:Record<string,unknown>; dry_run:Record<string,unknown>; result:Record<string,unknown>; candidates:CleanupCandidate[] }
 
-const branchForm = reactive({ branch: 'develop', base_branch: '', set_default: false })
-const treeForm = reactive({ branch: 'main', prefix: '' })
-const fileForm = reactive({ branch: 'main', path: 'README.md', message: 'chore: atualiza arquivo pelo ARGWS Git Monitor', content: '', overwrite: true })
-const bootstrapForm = reactive({ branch: 'main', overwrite: false, include_dockerfile: false, include_workflow: true })
-const releaseForm = reactive({ tag_name: 'v0.1.0', target_commitish: 'main', name: '', body: '', prerelease: false })
-const workflowForm = reactive({ workflow: 'docker-publish.yml', ref: 'main' })
-const packageForm = reactive({ owner: '', package_name: '' })
+const toasts=useToastStore(); const tab=ref<Tab>('repositories'); const loading=ref(true); const busy=ref('')
+const connections=ref<GitHubConnection[]>([]); const repositories=ref<Repository[]>([]); const selectedConnectionId=ref(''); const selectedRepositoryId=ref(''); const repositoryQuery=ref('')
+const branches=ref<BranchItem[]>([]); const tree=ref<GitHubTreeItem[]>([]); const fileContent=ref(''); const fileSha=ref(''); const actions=ref<ActionsData>({workflows:[],runs:[],artifacts:[],caches:[]}); const channels=ref<PublishingChannel[]>([])
+const packages=ref<GhcrPackage[]>([]); const packageDetail=ref<GhcrDetail|null>(null); const cleanupAnalyses=ref<CleanupAnalysis[]>([]); const selectedCleanupId=ref(''); const cleanupSelectedIds=ref<string[]>([])
+const bootstrapPreview=ref<BootstrapPreview|null>(null); const compareResult=ref<Record<string,unknown>|null>(null)
 
-const selectedRepository = computed(() => repositories.value.find((item) => item.id === selectedRepositoryId.value) || null)
-const selectedConnection = computed(() => connections.value.find((item) => item.id === selectedConnectionId.value) || null)
-const filteredRepositories = computed(() => {
-  const query = repositoryQuery.value.trim().toLowerCase()
-  const source = selectedConnectionId.value
-    ? repositories.value.filter((item) => item.connection_id === selectedConnectionId.value)
-    : repositories.value
-  if (!query) return source
-  return source.filter((item) => item.full_name.toLowerCase().includes(query))
-})
+const repoForm=reactive({owner:'',name:'',description:'',private:true,default_branch:'main',template:'readme',readme:true,gitignore:false,dockerfile:false,dockerignore:false,workflow:false,editorconfig:false})
+const bootstrapForm=reactive({branch:'main',template:'docker_ghcr'})
+const branchForm=reactive({branch:'develop',base_branch:'',set_default:false})
+const protectionForm=reactive({branch:'main',require_pull_request:true,approvals:1,enforce_admins:true,allow_force_pushes:false,allow_deletions:false,required_status_checks:''})
+const compareForm=reactive({base:'main',head:'develop'})
+const treeForm=reactive({branch:'main',prefix:''})
+const fileForm=reactive({branch:'main',path:'README.md',message:'chore: atualiza arquivo pelo ARGWS Git Monitor',content:'',overwrite:true})
+const releaseForm=reactive({tag_name:'v1.0.0',target_commitish:'main',name:'',body:'',draft:false,prerelease:false,make_latest:true,create_tag:true,channel_ids:[] as string[]})
+const channelForm=reactive({name:'GitHub Releases',kind:'github_release'})
+const workflowForm=reactive({workflow:'docker-publish.yml',ref:'main'})
+const packageForm=reactive({owner:'',package_name:'',preserve_tags:'latest'})
+const cleanupForm=reactive({criteriaText:'{}',preservationText:'{}',checkpointText:'{}'})
 
-async function loadRepositories(): Promise<Repository[]> {
-  const all: Repository[] = []
-  let page = 1
-  let pages = 1
-  do {
-    const response = await api.get<PaginatedResponse<Repository>>(`/repositories?page=${page}&page_size=100`)
-    all.push(...response.items)
-    pages = response.pages
-    page += 1
-  } while (page <= pages)
-  return all
-}
+const selectedRepository=computed(()=>repositories.value.find(x=>x.id===selectedRepositoryId.value)||null)
+const selectedConnection=computed(()=>connections.value.find(x=>x.id===selectedConnectionId.value)||null)
+const filteredRepositories=computed(()=>{const source=selectedConnectionId.value?repositories.value.filter(x=>x.connection_id===selectedConnectionId.value):repositories.value;const q=repositoryQuery.value.trim().toLowerCase();return q?source.filter(x=>x.full_name.toLowerCase().includes(q)):source})
+const selectedCleanup=computed(()=>cleanupAnalyses.value.find(x=>x.id===selectedCleanupId.value)||null)
+function err(error:unknown){return error instanceof ApiError?error.message:String(error)}
+function jsonObject(value:string){const parsed=JSON.parse(value||'{}') as unknown;if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')throw new Error('JSON deve ser um objeto.');return parsed as Record<string,unknown>}
+function bytes(value:number|null|undefined){if(!value)return '—';const units=['B','KB','MB','GB','TB'];let v=value,i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return `${v.toFixed(i?1:0)} ${units[i]}`}
+async function run(key:string,action:()=>Promise<void>){busy.value=key;try{await action()}catch(error){toasts.error('Operação recusada',err(error))}finally{busy.value=''}}
+async function loadRepositories(){const all:Repository[]=[];let page=1,pages=1;do{const r=await api.get<PaginatedResponse<Repository>>(`/repositories?page=${page}&page_size=100`);all.push(...r.items);pages=r.pages;page++}while(page<=pages);return all}
+async function load(){loading.value=true;try{const [c,r,ch]=await Promise.all([api.get<GitHubConnection[]>('/github/connections'),loadRepositories(),api.get<PublishingChannel[]>('/platform/publishing-channels')]);connections.value=c.filter(x=>x.status!=='demo');repositories.value=r;channels.value=ch;if(!selectedConnectionId.value&&connections.value.length)selectedConnectionId.value=connections.value[0].id;if(!selectedRepositoryId.value&&filteredRepositories.value.length)selectedRepositoryId.value=filteredRepositories.value[0].id;repoForm.owner=selectedConnection.value?.github_login||repoForm.owner;await loadContext()}catch(error){toasts.error('Falha ao carregar GitHub Tools',err(error))}finally{loading.value=false}}
+async function loadContext(){if(!selectedRepository.value)return;const repo=selectedRepository.value;branchForm.base_branch=repo.default_branch;bootstrapForm.branch=repo.default_branch;protectionForm.branch=repo.default_branch;compareForm.base=repo.default_branch;treeForm.branch=repo.default_branch;fileForm.branch=repo.default_branch;releaseForm.target_commitish=repo.default_branch;workflowForm.ref=repo.default_branch;packageForm.owner=repo.owner;packageForm.package_name=repo.name}
+watch(selectedConnectionId,()=>{const candidate=repositories.value.find(x=>x.connection_id===selectedConnectionId.value);if(candidate)selectedRepositoryId.value=candidate.id;repoForm.owner=selectedConnection.value?.github_login||'';packageForm.owner=selectedConnection.value?.github_login||''})
+watch(selectedRepository,()=>{void loadContext();branches.value=[];tree.value=[];compareResult.value=null;packageDetail.value=null;cleanupAnalyses.value=[]})
+watch(selectedCleanup,(item)=>{cleanupSelectedIds.value=(item?.candidates||[]).filter(x=>x.selected).map(x=>x.id)})
 
-async function load(): Promise<void> {
-  loading.value = true
-  try {
-    const [loadedConnections, loadedRepositories] = await Promise.all([
-      api.get<GitHubConnection[]>('/github/connections'),
-      loadRepositories()
-    ])
-    connections.value = loadedConnections.filter((item) => item.status !== 'demo')
-    repositories.value = loadedRepositories
-    if (!selectedConnectionId.value && connections.value.length) selectedConnectionId.value = connections.value[0].id
-    if (!selectedRepositoryId.value && filteredRepositories.value.length) selectedRepositoryId.value = filteredRepositories.value[0].id
-  } catch (error) {
-    toasts.error('Falha ao carregar GitHub Tools', error instanceof ApiError ? error.message : undefined)
-  } finally { loading.value = false }
-}
+async function createRepository(){if(!selectedConnection.value)return;await run('repo-create',async()=>{const result=await api.post<{repository_id:string;full_name:string;bootstrap_preview:BootstrapPreview|null}>('/github-tools-v2/repositories/online',{connection_id:selectedConnection.value!.id,owner:repoForm.owner,name:repoForm.name,description:repoForm.description||null,private:repoForm.private,default_branch:repoForm.default_branch,template:repoForm.template,options:{readme:repoForm.readme,gitignore:repoForm.gitignore,dockerfile:repoForm.dockerfile,dockerignore:repoForm.dockerignore,workflow:repoForm.workflow,editorconfig:repoForm.editorconfig}});repositories.value=await loadRepositories();selectedRepositoryId.value=result.repository_id;bootstrapPreview.value=result.bootstrap_preview;if(bootstrapPreview.value)bootstrapPreview.value.files.forEach(f=>f.action=f.status==='EXISTS'?'keep':'replace');toasts.success('Repositório criado',result.full_name)})}
+async function changeVisibility(){const repo=selectedRepository.value;if(!repo)return;const next=!repo.private;const expected=`VISIBILIDADE ${repo.full_name} ${next?'private':'public'}`;const confirmation=window.prompt(`Alterar visibilidade para ${next?'PRIVADO':'PÚBLICO'}?\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run('visibility',async()=>{await api.patch(`/github-tools-v2/repositories/${repo.id}/visibility`,{private:next,confirmation});toasts.success('Visibilidade atualizada',`${repo.full_name} agora é ${next?'privado':'público'}.`);await load()})}
+async function previewBootstrap(){const repo=selectedRepository.value;if(!repo)return;await run('bootstrap-preview',async()=>{const result=await api.post<BootstrapPreview>('/github-tools-v2/bootstrap/preview',{repository_id:repo.id,branch:bootstrapForm.branch,template:bootstrapForm.template,options:{readme:true,gitignore:bootstrapForm.template!=='readme',dockerfile:['docker','docker_ghcr'].includes(bootstrapForm.template),dockerignore:['docker','docker_ghcr'].includes(bootstrapForm.template),workflow:bootstrapForm.template==='docker_ghcr',editorconfig:bootstrapForm.template!=='readme'}});result.files.forEach(f=>f.action=f.status==='EXISTS'?'keep':'replace');bootstrapPreview.value=result})}
+async function applyBootstrap(){const repo=selectedRepository.value;if(!repo||!bootstrapPreview.value)return;await run('bootstrap-apply',async()=>{const result=await api.post<{changed:number}>(`/github-tools-v2/repositories/${repo.id}/bootstrap/apply`,{branch:bootstrapPreview.value!.branch,files:bootstrapPreview.value!.files.map(f=>({path:f.path,content:f.content,action:f.action||'keep'}))});toasts.success('Bootstrap aplicado',`${result.changed} arquivo(s) alterado(s).`);await previewBootstrap()})}
 
-watch(selectedConnectionId, () => {
-  const candidate = repositories.value.find((item) => item.connection_id === selectedConnectionId.value)
-  if (candidate) selectedRepositoryId.value = candidate.id
-  packageForm.owner = selectedConnection.value?.github_login || ''
-})
-watch(selectedRepository, (repository) => {
-  if (!repository) return
-  treeForm.branch = repository.default_branch
-  fileForm.branch = repository.default_branch
-  bootstrapForm.branch = repository.default_branch
-  releaseForm.target_commitish = repository.default_branch
-  workflowForm.ref = repository.default_branch
-  packageForm.package_name = repository.name
-  packageForm.owner = repository.owner
-})
+async function loadBranches(){const repo=selectedRepository.value;if(!repo)return;await run('branches-load',async()=>{branches.value=await api.get<BranchItem[]>(`/github-tools-v2/repositories/${repo.id}/branches`)})}
+async function createBranch(){const repo=selectedRepository.value;if(!repo)return;await run('branch-create',async()=>{const result=await api.post<{branch:string;created:boolean;set_default:boolean}>(`/github-tools/repositories/${repo.id}/branches`,{branch:branchForm.branch,base_branch:branchForm.base_branch||null,set_default:branchForm.set_default});toasts.success(result.created?'Branch criada':'Branch atualizada',result.branch);await load();await loadBranches()})}
+async function protectBranch(){const repo=selectedRepository.value;if(!repo)return;await run('protection',async()=>{await api.put(`/github-tools-v2/repositories/${repo.id}/branch-protection`,{branch:protectionForm.branch,require_pull_request:protectionForm.require_pull_request,approvals:protectionForm.approvals,enforce_admins:protectionForm.enforce_admins,allow_force_pushes:protectionForm.allow_force_pushes,allow_deletions:protectionForm.allow_deletions,required_status_checks:protectionForm.required_status_checks.split(',').map(x=>x.trim()).filter(Boolean)});toasts.success('Proteção atualizada',protectionForm.branch);await loadBranches()})}
+async function deleteBranch(branch:string){const repo=selectedRepository.value;if(!repo)return;const expected=`EXCLUIR BRANCH ${repo.full_name}:${branch}`;const confirmation=window.prompt(`Excluir branch ${branch}?\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run(`delete-${branch}`,async()=>{await api.delete(`/github-tools-v2/repositories/${repo.id}/branches/${encodeURIComponent(branch)}?confirmation=${encodeURIComponent(confirmation)}`);toasts.success('Branch removida',branch);await loadBranches()})}
+async function compareBranches(){const repo=selectedRepository.value;if(!repo)return;await run('compare',async()=>{compareResult.value=await api.get<Record<string,unknown>>(`/github-tools-v2/repositories/${repo.id}/compare?base=${encodeURIComponent(compareForm.base)}&head=${encodeURIComponent(compareForm.head)}`)})}
+async function loadTree(){const repo=selectedRepository.value;if(!repo)return;await run('tree',async()=>{const p=new URLSearchParams({branch:treeForm.branch});if(treeForm.prefix.trim())p.set('prefix',treeForm.prefix.trim());tree.value=await api.get<GitHubTreeItem[]>(`/github-tools/repositories/${repo.id}/tree?${p}`)})}
+async function readFile(path:string){const repo=selectedRepository.value;if(!repo)return;await run('file-read',async()=>{const result=await api.get<{path:string;sha:string;content:string;branch:string}>(`/github-tools-v2/repositories/${repo.id}/files/content?path=${encodeURIComponent(path)}&branch=${encodeURIComponent(treeForm.branch)}`);fileForm.path=result.path;fileForm.branch=result.branch;fileForm.content=result.content;fileSha.value=result.sha})}
+async function saveFile(){const repo=selectedRepository.value;if(!repo)return;await run('file-save',async()=>{const result=await api.put<ToolResult>(`/github-tools/repositories/${repo.id}/files`,fileForm);toasts.success('Arquivo salvo',result.message);await loadTree()})}
+async function deletePath(){const repo=selectedRepository.value;if(!repo||!treeForm.prefix.trim())return;const normalized=treeForm.prefix.trim().replace(/^\/+|\/+$/g,'');const expected=`${repo.full_name}:${normalized}`;const confirmation=window.prompt(`Excluir caminho recursivamente?\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run('path-delete',async()=>{const result=await api.post<ToolResult>(`/github-tools/repositories/${repo.id}/delete-path`,{branch:treeForm.branch,path:normalized,confirmation});toasts.success('Caminho removido',result.message);await loadTree()})}
 
-async function run(key: string, action: () => Promise<void>): Promise<void> {
-  busy.value = key
-  try { await action() }
-  catch (error) { toasts.error('Operação recusada', error instanceof ApiError ? error.message : undefined) }
-  finally { busy.value = '' }
-}
+async function loadActions(){const repo=selectedRepository.value;if(!repo)return;await run('actions-load',async()=>{actions.value=await api.get<ActionsData>(`/github-tools-v2/repositories/${repo.id}/actions`)})}
+async function dispatchWorkflow(){const repo=selectedRepository.value;if(!repo)return;await run('dispatch',async()=>{const result=await api.post<ToolResult>(`/github-tools/repositories/${repo.id}/dispatch`,workflowForm);toasts.success('Workflow iniciado',result.message);await loadActions()})}
+async function createChannel(){await run('channel',async()=>{const result=await api.post<PublishingChannel>('/platform/publishing-channels',{name:channelForm.name,kind:channelForm.kind,storage_provider_id:null,repository_id:selectedRepositoryId.value||null,config:{},secret:{},enabled:true});channels.value.push(result);toasts.success('Canal criado',result.name)})}
+async function createRelease(){const repo=selectedRepository.value;if(!repo)return;await run('release',async()=>{const result=await api.post<{job_id:string}>('/platform/releases',{repository_id:repo.id,tag_name:releaseForm.tag_name,target_commitish:releaseForm.target_commitish,name:releaseForm.name||null,body:releaseForm.body||null,draft:releaseForm.draft,prerelease:releaseForm.prerelease,make_latest:releaseForm.make_latest,create_tag:releaseForm.create_tag,assets:[],channel_ids:releaseForm.channel_ids});toasts.success('Release enfileirada',`Job ${result.job_id}`)})}
 
-async function createBranch(): Promise<void> {
-  if (!selectedRepository.value) return
-  await run('branch', async () => {
-    const result = await api.post<{ branch: string; created: boolean; set_default: boolean }>(
-      `/github-tools/repositories/${selectedRepository.value!.id}/branches`,
-      { ...branchForm, base_branch: branchForm.base_branch || null }
-    )
-    toasts.success(result.created ? 'Branch criada' : 'Branch já existia', `${result.branch}${result.set_default ? ' é agora a padrão.' : ''}`)
-    await load()
-  })
-}
+async function loadPackages(){const connection=selectedConnection.value;if(!connection)return;await run('packages',async()=>{const owner=packageForm.owner||connection.github_login;packages.value=await api.get<GhcrPackage[]>(`/github-tools-v2/connections/${connection.id}/ghcr/packages?owner=${encodeURIComponent(owner)}`)})}
+async function loadPackageDetail(name:string){const connection=selectedConnection.value;if(!connection)return;packageForm.package_name=name;await run('package-detail',async()=>{packageDetail.value=await api.get<GhcrDetail>(`/github-tools-v2/connections/${connection.id}/ghcr/packages/${encodeURIComponent(name)}?owner=${encodeURIComponent(packageForm.owner||connection.github_login)}`)})}
+async function deleteVersion(version:PackageVersion){const connection=selectedConnection.value;if(!connection)return;const owner=packageForm.owner||connection.github_login;const expected=`${owner}/${packageForm.package_name}:${version.id}`;const confirmation=window.prompt(`Excluir versão GHCR #${version.id}?\nTags: ${version.tags.join(', ')||'sem tags'}\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run(`ghcr-${version.id}`,async()=>{await api.post(`/github-tools/connections/${connection.id}/packages/${encodeURIComponent(packageForm.package_name)}/versions/${version.id}/delete?owner=${encodeURIComponent(owner)}`,{confirmation});toasts.success('Versão GHCR removida',String(version.id));await loadPackageDetail(packageForm.package_name)})}
+async function deleteByTag(tag:string){const connection=selectedConnection.value;if(!connection)return;const owner=packageForm.owner||connection.github_login;const expected=`EXCLUIR ${owner}/${packageForm.package_name}:${tag}`;const confirmation=window.prompt(`Excluir a versão que contém a tag ${tag}?\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run(`tag-${tag}`,async()=>{await api.post(`/github-tools-v2/connections/${connection.id}/ghcr/packages/${encodeURIComponent(packageForm.package_name)}/delete-by-tag?owner=${encodeURIComponent(owner)}`,{tag,confirmation});toasts.success('Tag/versão removida',tag);await loadPackageDetail(packageForm.package_name)})}
+async function deleteAllVersions(){const connection=selectedConnection.value;if(!connection||!packageForm.package_name)return;const owner=packageForm.owner||connection.github_login;const expected=`EXCLUIR TODAS AS VERSOES ${owner}/${packageForm.package_name}`;const confirmation=window.prompt(`Excluir versões do pacote preservando as tags informadas?\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run('ghcr-all',async()=>{const result=await api.post<{deleted:number[];preserved:unknown[];failed:unknown[]}>(`/github-tools-v2/connections/${connection.id}/ghcr/packages/${encodeURIComponent(packageForm.package_name)}/delete-all?owner=${encodeURIComponent(owner)}`,{confirmation,preserve_tags:packageForm.preserve_tags.split(',').map(x=>x.trim()).filter(Boolean)});toasts.success('Limpeza GHCR concluída',`${result.deleted.length} removida(s), ${result.preserved.length} preservada(s), ${result.failed.length} falha(s).`);await loadPackageDetail(packageForm.package_name)})}
+async function deletePackage(){const connection=selectedConnection.value;if(!connection||!packageForm.package_name)return;const owner=packageForm.owner||connection.github_login;const expected=`${owner}/${packageForm.package_name}`;const confirmation=window.prompt(`EXCLUSÃO INTEGRAL DO PACKAGE.\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run('ghcr-package',async()=>{await api.delete(`/github-tools-v2/connections/${connection.id}/ghcr/packages/${encodeURIComponent(packageForm.package_name)}?owner=${encodeURIComponent(owner)}&confirmation=${encodeURIComponent(confirmation)}`);packageDetail.value=null;toasts.success('Package removido',expected);await loadPackages()})}
 
-async function loadTree(): Promise<void> {
-  if (!selectedRepository.value) return
-  await run('tree', async () => {
-    const params = new URLSearchParams({ branch: treeForm.branch })
-    if (treeForm.prefix.trim()) params.set('prefix', treeForm.prefix.trim())
-    tree.value = await api.get<GitHubTreeItem[]>(`/github-tools/repositories/${selectedRepository.value!.id}/tree?${params}`)
-  })
-}
-
-async function saveFile(): Promise<void> {
-  if (!selectedRepository.value) return
-  await run('file', async () => {
-    const result = await api.put<ToolResult>(`/github-tools/repositories/${selectedRepository.value!.id}/files`, fileForm)
-    toasts.success('Arquivo salvo', result.message)
-    await loadTree()
-  })
-}
-
-async function deletePath(): Promise<void> {
-  const repository = selectedRepository.value
-  if (!repository || !treeForm.prefix.trim()) {
-    toasts.warning('Informe um caminho', 'Digite o arquivo ou diretório no campo Filtro/caminho.')
-    return
-  }
-  const expected = `${repository.full_name}:${treeForm.prefix.trim().replace(/^\/+|\/+$/g, '')}`
-  const confirmation = window.prompt(`Remover este caminho do GitHub?\n\nDigite exatamente:\n${expected}`)
-  if (confirmation !== expected) return
-  await run('delete-path', async () => {
-    const result = await api.post<ToolResult>(`/github-tools/repositories/${repository.id}/delete-path`, {
-      branch: treeForm.branch, path: treeForm.prefix, confirmation
-    })
-    toasts.success('Caminho removido', result.message)
-    await loadTree()
-  })
-}
-
-async function bootstrap(): Promise<void> {
-  if (!selectedRepository.value) return
-  await run('bootstrap', async () => {
-    const result = await api.post<ToolResult>(`/github-tools/repositories/${selectedRepository.value!.id}/bootstrap`, bootstrapForm)
-    toasts.success('Estrutura inicial aplicada', result.message)
-  })
-}
-
-async function createRelease(): Promise<void> {
-  if (!selectedRepository.value) return
-  await run('release', async () => {
-    const result = await api.post<ToolResult>(`/github-tools/repositories/${selectedRepository.value!.id}/releases`, {
-      ...releaseForm, name: releaseForm.name || null, body: releaseForm.body || null
-    })
-    toasts.success('Release criada', result.message)
-  })
-}
-
-async function dispatchWorkflow(): Promise<void> {
-  if (!selectedRepository.value) return
-  await run('dispatch', async () => {
-    const result = await api.post<ToolResult>(`/github-tools/repositories/${selectedRepository.value!.id}/dispatch`, workflowForm)
-    toasts.success('Workflow iniciado', result.message)
-  })
-}
-
-async function loadPackages(): Promise<void> {
-  if (!selectedConnection.value || !packageForm.package_name.trim()) return
-  await run('packages', async () => {
-    const owner = encodeURIComponent(packageForm.owner || selectedConnection.value!.github_login)
-    const name = encodeURIComponent(packageForm.package_name.trim())
-    packageVersions.value = await api.get<PackageVersion[]>(`/github-tools/connections/${selectedConnection.value!.id}/packages/${name}/versions?owner=${owner}`)
-  })
-}
-
-async function deletePackageVersion(version: PackageVersion): Promise<void> {
-  if (!selectedConnection.value) return
-  const owner = packageForm.owner || selectedConnection.value.github_login
-  const expected = `${owner}/${packageForm.package_name}:${version.id}`
-  const confirmation = window.prompt(`Excluir esta versão do GHCR?\nTags: ${version.tags.join(', ') || 'sem tags'}\n\nDigite exatamente:\n${expected}`)
-  if (confirmation !== expected) return
-  await run(`package-${version.id}`, async () => {
-    const result = await api.post<ToolResult>(
-      `/github-tools/connections/${selectedConnection.value!.id}/packages/${encodeURIComponent(packageForm.package_name)}/versions/${version.id}/delete?owner=${encodeURIComponent(owner)}`,
-      { confirmation }
-    )
-    toasts.success('Versão removida', result.message)
-    await loadPackages()
-  })
-}
-
-async function deletePackage(): Promise<void> {
-  if (!selectedConnection.value || !packageForm.package_name) return
-  const owner = packageForm.owner || selectedConnection.value.github_login
-  const expected = `${owner}/${packageForm.package_name}`
-  const confirmation = window.prompt(`EXCLUSÃO DO PACOTE GHCR.\nDigite exatamente:\n${expected}`)
-  if (confirmation !== expected) return
-  await run('delete-package', async () => {
-    const result = await api.post<ToolResult>(
-      `/github-tools/connections/${selectedConnection.value!.id}/packages/${encodeURIComponent(packageForm.package_name)}/delete?owner=${encodeURIComponent(owner)}`,
-      { confirmation }
-    )
-    packageVersions.value = []
-    toasts.success('Pacote removido', result.message)
-  })
-}
+async function loadCleanup(){const repo=selectedRepository.value;if(!repo)return;cleanupAnalyses.value=await api.get<CleanupAnalysis[]>(`/platform/cleanup?repository_id=${repo.id}&limit=20`);if(cleanupAnalyses.value.length&&!selectedCleanupId.value)selectedCleanupId.value=cleanupAnalyses.value[0].id}
+async function analyzeCleanup(){const repo=selectedRepository.value;if(!repo)return;await run('cleanup-analyze',async()=>{const r=await api.post<{job_id:string}>('/platform/cleanup/analyze',{repository_id:repo.id,profile_id:null,criteria:jsonObject(cleanupForm.criteriaText),preservation_rules:jsonObject(cleanupForm.preservationText),canonical_checkpoint:jsonObject(cleanupForm.checkpointText)});toasts.success('Análise enfileirada',`Job ${r.job_id}; nenhum DELETE nesta etapa.`)})}
+async function refreshCleanup(){await loadCleanup();if(selectedCleanupId.value){const detail=await api.get<CleanupAnalysis>(`/platform/cleanup/${selectedCleanupId.value}`);const i=cleanupAnalyses.value.findIndex(x=>x.id===detail.id);if(i>=0)cleanupAnalyses.value[i]=detail}}
+async function saveCleanupSelection(){if(!selectedCleanup.value)return;const updated=await api.put<CleanupAnalysis>(`/platform/cleanup/${selectedCleanup.value.id}/selection`,{candidate_ids:cleanupSelectedIds.value});const i=cleanupAnalyses.value.findIndex(x=>x.id===updated.id);if(i>=0)cleanupAnalyses.value[i]=updated}
+async function cleanupDryRun(){if(!selectedCleanup.value)return;await run('cleanup-dry',async()=>{await saveCleanupSelection();const r=await api.post<{job_id:string}>(`/platform/cleanup/${selectedCleanup.value!.id}/dry-run`,{});toasts.success('Dry Run iniciado',`Job ${r.job_id}`)})}
+async function cleanupExecute(){const item=selectedCleanup.value;if(!item)return;const expected=`EXECUTAR ${item.reference}`;const confirmation=window.prompt(`Executar o plano aprovado?\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run('cleanup-execute',async()=>{await saveCleanupSelection();const r=await api.post<{job_id:string}>(`/platform/cleanup/${item.id}/execute`,{confirmation,create_backup:true});toasts.success('Cleanup iniciado',`Job ${r.job_id}`)})}
 
 onMounted(load)
 </script>
 
-<template>
-  <div class="page-stack tools-page">
-    <section class="page-heading">
-      <div><span class="eyebrow">GITHUB ONLINE + GHCR</span><h2>GitHub Tools</h2><p>Gerenciamento online de branches, arquivos, estrutura inicial, releases, workflows e pacotes GHCR — portado da ferramenta PowerShell para FastAPI/Vue.</p></div>
-      <button class="button secondary" :disabled="loading" @click="load"><RefreshCw :size="16" />Atualizar</button>
+<template><div class="page-stack tools-page">
+  <section class="page-heading"><div><span class="eyebrow">CENTRAL GITHUB ONLINE</span><h2>GitHub Tools</h2><p>Administração online nativa do GitHub/GHCR, sem subprocessos PowerShell e sem repositório hardcoded.</p></div><button class="button secondary" :disabled="loading" @click="load"><RefreshCw :size="16"/>Atualizar</button></section>
+  <nav class="tabs"><button :class="{active:tab==='repositories'}" @click="tab='repositories'"><Boxes :size="15"/>Repositórios</button><button :class="{active:tab==='branches'}" @click="tab='branches'"><GitBranch :size="15"/>Branches & Arquivos</button><button :class="{active:tab==='releases'}" @click="tab='releases'"><Tag :size="15"/>Releases & Actions</button><button :class="{active:tab==='ghcr'}" @click="tab='ghcr'"><Package :size="15"/>GHCR</button><button :class="{active:tab==='cleanup'}" @click="tab='cleanup'"><Trash2 :size="15"/>Cleanup</button></nav>
+  <section class="control-strip"><label class="field"><span>Conexão GitHub</span><select v-model="selectedConnectionId"><option v-for="connection in connections" :key="connection.id" :value="connection.id">{{connection.name}} · @{{connection.github_login}}</option></select></label><label class="field"><span>Filtrar repositório</span><div class="input-with-icon"><Search :size="15"/><input v-model="repositoryQuery" placeholder="owner/repo"/></div></label><label class="field"><span>Repositório</span><select v-model="selectedRepositoryId"><option value="">Nenhum / criar novo</option><option v-for="repo in filteredRepositories" :key="repo.id" :value="repo.id">{{repo.full_name}}</option></select></label></section>
+
+  <template v-if="tab==='repositories'">
+    <section class="grid cols-2"><article class="tool-card"><header><GitFork :size="19"/><div><strong>Repository Manager</strong><span>Criação totalmente online por API GitHub.</span></div></header><div class="grid cols-2"><label class="field"><span>Owner</span><input v-model="repoForm.owner"/></label><label class="field"><span>Nome</span><input v-model="repoForm.name"/></label></div><label class="field"><span>Descrição</span><input v-model="repoForm.description"/></label><div class="grid cols-2"><label class="field"><span>Visibilidade</span><select v-model="repoForm.private"><option :value="true">Private</option><option :value="false">Public</option></select></label><label class="field"><span>Default branch</span><input v-model="repoForm.default_branch"/></label></div><label class="field"><span>Template</span><select v-model="repoForm.template"><option value="empty">Vazio</option><option value="readme">README básico</option><option value="docker">Docker</option><option value="docker_ghcr">Docker + GHCR</option><option value="custom">Personalizado</option></select></label><button class="button primary" :disabled="busy==='repo-create'||!repoForm.name||!selectedConnection" @click="createRepository"><Rocket :size="15"/>Criar repositório</button></article>
+      <article class="tool-card"><header><ShieldCheck :size="19"/><div><strong>Repository Settings</strong><span>Visibilidade e estado do repositório selecionado.</span></div></header><template v-if="selectedRepository"><p><b>{{selectedRepository.full_name}}</b></p><div class="facts"><span>{{selectedRepository.private?'Private':'Public'}}</span><span>{{selectedRepository.default_branch}}</span><span>{{selectedRepository.archived?'Archived':'Active'}}</span></div><button class="button secondary" @click="changeVisibility">Tornar {{selectedRepository.private?'público':'privado'}}</button></template><p v-else class="empty">Selecione um repositório para administrar.</p></article>
     </section>
+    <section class="tool-card wide"><header><UploadCloud :size="19"/><div><strong>Repository Bootstrap / Docker & GHCR Bootstrap</strong><span>Preview obrigatório antes de criar ou substituir arquivos.</span></div></header><div class="grid cols-2"><label class="field"><span>Branch</span><input v-model="bootstrapForm.branch"/></label><label class="field"><span>Template</span><select v-model="bootstrapForm.template"><option value="readme">README</option><option value="docker">Docker</option><option value="docker_ghcr">Docker + GHCR</option><option value="custom">Custom</option></select></label></div><div class="actions"><button class="button secondary" :disabled="!selectedRepository||busy==='bootstrap-preview'" @click="previewBootstrap">Analisar estrutura</button><button class="button primary" :disabled="!bootstrapPreview||busy==='bootstrap-apply'" @click="applyBootstrap">Aplicar estrutura</button></div><div v-if="bootstrapPreview" class="preview-list"><article v-for="file in bootstrapPreview.files" :key="file.path"><div><code>{{file.path}}</code><span class="status">{{file.status}}</span></div><select v-model="file.action"><option value="keep">Manter existente</option><option value="replace">{{file.status==='CREATE'?'Criar':'Substituir'}}</option></select><details v-if="file.diff"><summary>Visualizar diferença</summary><pre>{{file.diff}}</pre></details></article></div></section>
+  </template>
 
-    <section class="control-strip">
-      <label class="field"><span>Conexão GitHub</span><select v-model="selectedConnectionId"><option v-for="connection in connections" :key="connection.id" :value="connection.id">{{ connection.name }} · @{{ connection.github_login }}</option></select></label>
-      <label class="field search-repo"><span>Filtrar repositório</span><div class="input-with-icon"><Search :size="15" /><input v-model="repositoryQuery" placeholder="owner/repo" /></div></label>
-      <label class="field"><span>Repositório</span><select v-model="selectedRepositoryId"><option v-for="repository in filteredRepositories" :key="repository.id" :value="repository.id">{{ repository.full_name }}</option></select></label>
-    </section>
+  <template v-else-if="tab==='branches'">
+    <section class="grid cols-2"><article class="tool-card"><header><GitBranch :size="19"/><div><strong>Branch Manager</strong><span>Criar, definir default e excluir com confirmação.</span></div></header><div class="grid cols-2"><label class="field"><span>Branch</span><input v-model="branchForm.branch"/></label><label class="field"><span>Base</span><input v-model="branchForm.base_branch"/></label></div><label class="check"><input v-model="branchForm.set_default" type="checkbox"/>Definir como default</label><div class="actions"><button class="button primary" @click="createBranch">Criar/garantir</button><button class="button secondary" @click="loadBranches">Atualizar branches</button></div><div class="branch-list"><div v-for="branch in branches" :key="branch.name"><div><b>{{branch.name}}</b><small>{{branch.sha?.slice(0,10)}} · {{branch.default?'default · ':''}}{{branch.protected?'protected':'unprotected'}}</small></div><button v-if="!branch.default" class="button ghost danger-text" @click="deleteBranch(branch.name)">Excluir</button></div></div></article>
+      <article class="tool-card"><header><ShieldCheck :size="19"/><div><strong>Branch Protection</strong><span>Configuração por branch, não presa à main.</span></div></header><label class="field"><span>Branch</span><input v-model="protectionForm.branch"/></label><div class="checks"><label class="check"><input v-model="protectionForm.require_pull_request" type="checkbox"/>Exigir PR</label><label class="check"><input v-model="protectionForm.enforce_admins" type="checkbox"/>Admins</label><label class="check"><input v-model="protectionForm.allow_force_pushes" type="checkbox"/>Permitir force push</label><label class="check"><input v-model="protectionForm.allow_deletions" type="checkbox"/>Permitir exclusão</label></div><label class="field"><span>Aprovações</span><input v-model.number="protectionForm.approvals" type="number" min="0" max="6"/></label><label class="field"><span>Status checks (vírgula)</span><input v-model="protectionForm.required_status_checks"/></label><button class="button primary" @click="protectBranch">Aplicar proteção</button></article></section>
+    <section class="tool-card wide"><header><GitCompare :size="19"/><div><strong>Compare</strong><span>Comparação real pela API GitHub.</span></div></header><div class="grid cols-2"><label class="field"><span>Base</span><input v-model="compareForm.base"/></label><label class="field"><span>Head</span><input v-model="compareForm.head"/></label></div><button class="button secondary" @click="compareBranches">Comparar</button><pre v-if="compareResult">{{JSON.stringify(compareResult,null,2)}}</pre></section>
+    <section class="tool-card wide"><header><FileCode2 :size="19"/><div><strong>Repository Files</strong><span>Navegar, ler, criar/editar e excluir caminhos remotamente.</span></div></header><div class="grid cols-3"><label class="field"><span>Branch</span><input v-model="treeForm.branch"/></label><label class="field span-2"><span>Filtro/caminho</span><input v-model="treeForm.prefix" placeholder="backend/app ou README.md"/></label></div><div class="actions"><button class="button secondary" @click="loadTree"><Search :size="15"/>Listar árvore</button><button class="button ghost danger-text" @click="deletePath"><Trash2 :size="15"/>Excluir caminho</button></div><div v-if="tree.length" class="tree-list"><button v-for="item in tree.slice(0,300)" :key="item.path" :disabled="item.type!=='blob'" @click="item.type==='blob'&&readFile(item.path)"><code>{{item.path}}</code><span>{{item.type}} · {{item.size||0}} B</span></button></div><div class="file-editor"><div class="grid cols-2"><label class="field"><span>Branch</span><input v-model="fileForm.branch"/></label><label class="field"><span>Arquivo</span><input v-model="fileForm.path"/></label></div><label class="field"><span>Mensagem</span><input v-model="fileForm.message"/></label><label class="field"><span>Conteúdo UTF-8</span><textarea v-model="fileForm.content" class="code-editor"/></label><small v-if="fileSha">SHA atual: {{fileSha}}</small><button class="button primary" @click="saveFile"><Save :size="15"/>Salvar arquivo</button></div></section>
+  </template>
 
-    <div v-if="!selectedRepository" class="empty-tools"><Boxes :size="28" /><strong>Nenhum repositório monitorado selecionado</strong><p>Conecte o GitHub e monitore ao menos um repositório.</p></div>
+  <template v-else-if="tab==='releases'">
+    <section class="grid cols-2"><article class="tool-card"><header><Tag :size="19"/><div><strong>Release Manager</strong><span>Tag, versão, notas, draft/prerelease/latest e publishing channels.</span></div></header><div class="grid cols-2"><label class="field"><span>Tag</span><input v-model="releaseForm.tag_name"/></label><label class="field"><span>Target</span><input v-model="releaseForm.target_commitish"/></label></div><label class="field"><span>Título</span><input v-model="releaseForm.name"/></label><label class="field"><span>Descrição</span><textarea v-model="releaseForm.body"/></label><div class="checks"><label class="check"><input v-model="releaseForm.create_tag" type="checkbox"/>Criar tag</label><label class="check"><input v-model="releaseForm.draft" type="checkbox"/>Draft</label><label class="check"><input v-model="releaseForm.prerelease" type="checkbox"/>Prerelease</label><label class="check"><input v-model="releaseForm.make_latest" type="checkbox"/>Latest</label></div><div class="channel-list"><label v-for="channel in channels" :key="channel.id" class="check"><input v-model="releaseForm.channel_ids" type="checkbox" :value="channel.id"/>{{channel.name}} · {{channel.kind}}</label></div><button class="button primary" :disabled="!selectedRepository" @click="createRelease"><Tag :size="15"/>Publicar release</button></article>
+      <article class="tool-card"><header><Play :size="19"/><div><strong>Workflow Dispatch</strong><span>Executar workflow por arquivo ou ID.</span></div></header><label class="field"><span>Workflow</span><input v-model="workflowForm.workflow"/></label><label class="field"><span>Ref</span><input v-model="workflowForm.ref"/></label><div class="actions"><button class="button primary" @click="dispatchWorkflow"><Play :size="15"/>Executar</button><button class="button secondary" @click="loadActions">Atualizar Actions</button></div><hr/><label class="field"><span>Novo canal de publicação</span><div class="grid cols-2"><input v-model="channelForm.name"/><select v-model="channelForm.kind"><option value="github_release">GitHub Release</option><option value="github_repository">Outro repositório</option><option value="s3">S3</option><option value="minio">MinIO</option><option value="google_drive">Drive</option><option value="dropbox">Dropbox</option><option value="sftp">SFTP</option></select></div></label><button class="button ghost" @click="createChannel">Criar canal básico</button></article></section>
+    <section class="stats-row"><article><span>Workflows</span><strong>{{actions.workflows.length}}</strong></article><article><span>Runs</span><strong>{{actions.runs.length}}</strong></article><article><span>Artifacts</span><strong>{{actions.artifacts.length}}</strong></article><article><span>Cache</span><strong>{{actions.caches.length}}</strong></article></section>
+    <section class="tool-card wide"><header><Wrench :size="19"/><div><strong>Runs, Artifacts e Actions Cache</strong><span>Dados atuais do repositório selecionado.</span></div></header><div class="data-columns"><div><h4>Runs</h4><pre>{{JSON.stringify(actions.runs.slice(0,30),null,2)}}</pre></div><div><h4>Artifacts</h4><pre>{{JSON.stringify(actions.artifacts.slice(0,30),null,2)}}</pre></div><div><h4>Cache</h4><pre>{{JSON.stringify(actions.caches.slice(0,30),null,2)}}</pre></div></div></section>
+  </template>
 
-    <template v-else>
-      <section class="tool-grid">
-        <article class="tool-card">
-          <header><GitBranch :size="19" /><div><strong>Branches</strong><span>Criar e definir branch padrão</span></div></header>
-          <div class="form-grid"><label class="field"><span>Nova branch</span><input v-model="branchForm.branch" /></label><label class="field"><span>Base (vazio = padrão atual)</span><input v-model="branchForm.base_branch" /></label></div>
-          <label class="check"><input v-model="branchForm.set_default" type="checkbox" /> Definir como branch padrão</label>
-          <button class="button primary" :disabled="busy==='branch'" @click="createBranch"><GitFork :size="15" />Criar/garantir branch</button>
-        </article>
+  <template v-else-if="tab==='ghcr'">
+    <section class="tool-card wide"><header><Package :size="19"/><div><strong>GHCR Packages</strong><span>Owner user/org detectado no backend; nenhuma imagem precisa ser baixada localmente.</span></div></header><div class="grid cols-2"><label class="field"><span>Owner</span><input v-model="packageForm.owner"/></label><label class="field"><span>Package</span><input v-model="packageForm.package_name"/></label></div><div class="actions"><button class="button secondary" @click="loadPackages">Listar packages</button><button class="button primary" :disabled="!packageForm.package_name" @click="loadPackageDetail(packageForm.package_name)">Carregar package</button></div><div class="package-list"><button v-for="item in packages" :key="String(item.id||item.name)" @click="item.name&&loadPackageDetail(item.name)"><b>{{item.name}}</b><span>{{item.visibility||'—'}} · {{item.updated_at||item.created_at||'—'}}</span></button></div></section>
+    <section v-if="packageDetail" class="tool-card wide"><header><div><strong>{{packageForm.owner}}/{{packageForm.package_name}}</strong><span>{{packageDetail.version_count}} versões · {{packageDetail.tag_count}} tags</span></div><button class="button ghost danger-text" @click="deletePackage">Excluir package</button></header><label class="field"><span>Tags a preservar em limpeza integral</span><input v-model="packageForm.preserve_tags" placeholder="latest, production, v1.5.0"/></label><div class="actions"><button class="button secondary" @click="deleteAllVersions">Excluir versões não preservadas</button></div><div class="table-wrap"><table><thead><tr><th>Version ID</th><th>Digest/Name</th><th>Tags</th><th>Criada</th><th></th></tr></thead><tbody><tr v-for="version in packageDetail.versions" :key="version.id"><td>{{version.id}}</td><td><code>{{version.name?.slice(0,32)||'—'}}</code></td><td><button v-for="tag in version.tags" :key="tag" class="tag-chip" @click="deleteByTag(tag)">{{tag}}</button><span v-if="!version.tags.length">untagged</span></td><td>{{version.created_at||'—'}}</td><td><button class="button ghost danger-text" @click="deleteVersion(version)">Excluir versão</button></td></tr></tbody></table></div></section>
+  </template>
 
-        <article class="tool-card">
-          <header><Rocket :size="19" /><div><strong>Bootstrap online</strong><span>README, .gitignore, Dockerfile opcional e workflow GHCR</span></div></header>
-          <label class="field"><span>Branch</span><input v-model="bootstrapForm.branch" /></label>
-          <div class="check-row"><label class="check"><input v-model="bootstrapForm.include_workflow" type="checkbox" /> Workflow Docker/GHCR</label><label class="check"><input v-model="bootstrapForm.include_dockerfile" type="checkbox" /> Dockerfile placeholder</label><label class="check"><input v-model="bootstrapForm.overwrite" type="checkbox" /> Sobrescrever existentes</label></div>
-          <button class="button primary" :disabled="busy==='bootstrap'" @click="bootstrap"><UploadCloud :size="15" />Aplicar estrutura</button>
-        </article>
-
-        <article class="tool-card">
-          <header><Tag :size="19" /><div><strong>Release</strong><span>Criar tag/release diretamente no GitHub</span></div></header>
-          <div class="form-grid"><label class="field"><span>Tag</span><input v-model="releaseForm.tag_name" /></label><label class="field"><span>Target</span><input v-model="releaseForm.target_commitish" /></label></div>
-          <label class="field"><span>Nome</span><input v-model="releaseForm.name" placeholder="Opcional" /></label><label class="field"><span>Notas</span><textarea v-model="releaseForm.body" placeholder="Vazio = notas automáticas" /></label>
-          <label class="check"><input v-model="releaseForm.prerelease" type="checkbox" /> Pré-release</label>
-          <button class="button primary" :disabled="busy==='release'" @click="createRelease"><Tag :size="15" />Criar release</button>
-        </article>
-
-        <article class="tool-card">
-          <header><Play :size="19" /><div><strong>Workflow dispatch</strong><span>Executar workflow por arquivo ou ID</span></div></header>
-          <label class="field"><span>Workflow</span><input v-model="workflowForm.workflow" placeholder="docker-publish.yml" /></label><label class="field"><span>Ref</span><input v-model="workflowForm.ref" /></label>
-          <button class="button primary" :disabled="busy==='dispatch'" @click="dispatchWorkflow"><Play :size="15" />Executar workflow</button>
-        </article>
-      </section>
-
-      <section class="tool-card wide">
-        <header><FileCode2 :size="19" /><div><strong>Arquivos online</strong><span>Listar árvore, criar/atualizar arquivos e remover caminho recursivamente</span></div></header>
-        <div class="form-grid three"><label class="field"><span>Branch</span><input v-model="treeForm.branch" /></label><label class="field span-2"><span>Filtro/caminho</span><input v-model="treeForm.prefix" placeholder=".github/workflows ou arquivo.txt" /></label></div>
-        <div class="button-row"><button class="button secondary" :disabled="busy==='tree'" @click="loadTree"><Search :size="15" />Listar árvore</button><button class="button ghost danger-text" :disabled="busy==='delete-path'" @click="deletePath"><Trash2 :size="15" />Excluir caminho</button></div>
-        <div v-if="tree.length" class="tree-list"><div v-for="item in tree.slice(0,200)" :key="item.path"><code>{{ item.path }}</code><span>{{ item.type }}<template v-if="item.size"> · {{ item.size }} bytes</template></span></div></div>
-        <div class="file-editor"><div class="form-grid"><label class="field"><span>Branch</span><input v-model="fileForm.branch" /></label><label class="field"><span>Caminho do arquivo</span><input v-model="fileForm.path" /></label></div><label class="field"><span>Mensagem do commit</span><input v-model="fileForm.message" /></label><label class="field"><span>Conteúdo UTF-8</span><textarea v-model="fileForm.content" class="code-editor" spellcheck="false" /></label><label class="check"><input v-model="fileForm.overwrite" type="checkbox" /> Atualizar se o arquivo já existir</label><button class="button primary" :disabled="busy==='file'" @click="saveFile"><Save :size="15" />Salvar no GitHub</button></div>
-      </section>
-
-      <section class="tool-card wide">
-        <header><Package :size="19" /><div><strong>GitHub Container Registry</strong><span>Listar tags/versões e remover versões ou pacote inteiro</span></div></header>
-        <div class="form-grid three"><label class="field"><span>Owner/organização</span><input v-model="packageForm.owner" /></label><label class="field span-2"><span>Nome do pacote</span><input v-model="packageForm.package_name" /></label></div>
-        <div class="button-row"><button class="button secondary" :disabled="busy==='packages'" @click="loadPackages"><RefreshCw :size="15" />Consultar GHCR</button><button class="button ghost danger-text" :disabled="busy==='delete-package'" @click="deletePackage"><Trash2 :size="15" />Excluir pacote</button></div>
-        <div v-if="packageVersions.length" class="package-list"><article v-for="version in packageVersions" :key="version.id"><div><strong>#{{ version.id }}</strong><span>{{ version.tags.join(', ') || 'sem tags' }}</span><small>{{ version.name }}</small></div><button class="button ghost compact danger-text" @click="deletePackageVersion(version)"><Trash2 :size="14" />Remover versão</button></article></div><p v-else class="tool-hint">Consulte o pacote para listar versões e tags. Para excluir, o token precisa de permissão de packages.</p>
-      </section>
-    </template>
-  </div>
-</template>
+  <template v-else>
+    <section class="cleanup-warning"><ShieldCheck :size="19"/><div><strong>Repository Cleanup Engine</strong><span>Analyze → Plan → Dry Run → Review → Backup → Confirm → Execute → Validate → Audit. Nenhuma exclusão automática por idade.</span></div></section>
+    <section class="tool-card wide"><header><Trash2 :size="19"/><div><strong>Repository Analysis</strong><span>Critérios avulsos ou profiles podem ser gerenciados na Repository Clinic.</span></div></header><div class="grid cols-3"><label class="field"><span>Critérios JSON</span><textarea v-model="cleanupForm.criteriaText" class="mini-code"/></label><label class="field"><span>Preservação JSON</span><textarea v-model="cleanupForm.preservationText" class="mini-code"/></label><label class="field"><span>Checkpoint JSON</span><textarea v-model="cleanupForm.checkpointText" class="mini-code"/></label></div><div class="actions"><button class="button primary" :disabled="!selectedRepository" @click="analyzeCleanup"><Search :size="15"/>Analisar repositório</button><button class="button secondary" @click="refreshCleanup"><RefreshCw :size="15"/>Atualizar análises</button><RouterLink class="button ghost" to="/repository-clinic">Abrir Clínica completa</RouterLink></div></section>
+    <section v-if="cleanupAnalyses.length" class="tool-card wide"><label class="field"><span>Análise</span><select v-model="selectedCleanupId" @change="refreshCleanup"><option v-for="item in cleanupAnalyses" :key="item.id" :value="item.id">{{item.reference}} · {{item.status}}</option></select></label><template v-if="selectedCleanup"><div class="facts"><span>{{selectedCleanup.status}}</span><span>{{selectedCleanup.candidates.length}} candidatos</span><span>{{bytes(selectedCleanup.estimated_reclaimed_bytes)}}</span></div><div class="actions"><button class="button ghost" @click="cleanupSelectedIds=selectedCleanup.candidates.filter(x=>!x.protected&&x.action_class==='safe').map(x=>x.id)">Selecionar SAFE</button><button class="button secondary" @click="cleanupDryRun">Dry Run</button><button class="button danger-button" :disabled="selectedCleanup.status!=='ready'" @click="cleanupExecute">Execute</button></div><div class="table-wrap"><table><thead><tr><th></th><th>Classe</th><th>Tipo</th><th>Recurso</th><th>Motivo</th></tr></thead><tbody><tr v-for="candidate in selectedCleanup.candidates" :key="candidate.id"><td><input v-model="cleanupSelectedIds" type="checkbox" :value="candidate.id" :disabled="candidate.protected"/></td><td>{{candidate.action_class}}</td><td>{{candidate.resource_type}}</td><td><code>{{candidate.resource_key}}</code></td><td>{{candidate.reason}}<small v-if="candidate.protected"> · PROTEGIDO</small></td></tr></tbody></table></div><pre v-if="Object.keys(selectedCleanup.dry_run||{}).length">{{JSON.stringify(selectedCleanup.dry_run,null,2)}}</pre></template></section>
+  </template>
+</div></template>
 
 <style scoped>
-.control-strip{display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:.8rem;padding:1rem;border:1px solid var(--border);border-radius:1rem;background:var(--surface);box-shadow:var(--shadow-sm)}.tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.tool-card{display:grid;align-content:start;gap:.8rem;padding:1rem;border:1px solid var(--border);border-radius:1rem;background:var(--surface);box-shadow:var(--shadow-sm)}.tool-card.wide{width:100%}.tool-card header{display:flex;align-items:center;gap:.65rem;padding-bottom:.7rem;border-bottom:1px solid var(--border-soft);color:var(--primary-strong)}.tool-card header div{display:grid}.tool-card header strong{color:var(--text-strong)}.tool-card header span{color:var(--text-muted);font-size:.68rem}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem}.form-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}.span-2{grid-column:span 2}.check-row,.button-row{display:flex;flex-wrap:wrap;gap:.65rem}.check{display:flex;align-items:center;gap:.4rem;color:var(--text-muted);font-size:.72rem}.check input{accent-color:var(--primary)}.tree-list{max-height:300px;overflow:auto;border:1px solid var(--border-soft);border-radius:.7rem;background:var(--surface-soft)}.tree-list div{display:flex;justify-content:space-between;gap:1rem;padding:.45rem .65rem;border-bottom:1px solid var(--border-soft);font-size:.68rem}.tree-list code{color:var(--text)}.tree-list span{color:var(--text-subtle)}.file-editor{display:grid;gap:.7rem;padding-top:.8rem;border-top:1px solid var(--border-soft)}.code-editor{min-height:220px!important;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.72rem}.package-list{display:grid;border:1px solid var(--border-soft);border-radius:.8rem;overflow:hidden}.package-list article{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.7rem;border-bottom:1px solid var(--border-soft)}.package-list article:last-child{border-bottom:0}.package-list article div{display:grid}.package-list span{color:var(--primary-strong);font-size:.7rem}.package-list small,.tool-hint{color:var(--text-muted);font-size:.68rem}.tool-hint{margin:0}.empty-tools{display:grid;place-items:center;gap:.4rem;padding:4rem;border:1px dashed var(--border);border-radius:1rem;color:var(--text-muted);text-align:center;background:var(--surface)}.empty-tools strong{color:var(--text-strong)}.danger-text{color:var(--danger)!important}
-@media(max-width:900px){.control-strip,.tool-grid{grid-template-columns:1fr}.form-grid.three{grid-template-columns:1fr}.span-2{grid-column:auto}}@media(max-width:600px){.form-grid{grid-template-columns:1fr}.control-strip{padding:.8rem}.package-list article{align-items:stretch;flex-direction:column}.package-list .button{width:100%}}
+.tabs{display:flex;gap:.3rem;overflow:auto;padding:.35rem;border:1px solid var(--border);border-radius:.9rem;background:var(--surface)}.tabs button{display:flex;align-items:center;gap:.35rem;white-space:nowrap;padding:.58rem .72rem;color:var(--text-muted);border-radius:.62rem;background:transparent}.tabs button.active{color:var(--text-strong);background:var(--surface-raised);box-shadow:inset 0 0 0 1px var(--border)}.control-strip{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:.65rem;padding:.75rem;border:1px solid var(--border);border-radius:.9rem;background:var(--surface)}.grid{display:grid;gap:.7rem}.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.tool-card{padding:.9rem;border:1px solid var(--border);border-radius:.9rem;background:var(--surface);box-shadow:var(--shadow-sm)}.tool-card>header{display:flex;align-items:flex-start;gap:.55rem;margin-bottom:.75rem}.tool-card header div{display:grid}.tool-card header span{color:var(--text-muted);font-size:.66rem}.wide{width:100%}.actions,.checks,.facts,.channel-list{display:flex;gap:.55rem;flex-wrap:wrap;align-items:center;margin:.65rem 0}.facts span{padding:.2rem .45rem;border-radius:999px;background:var(--surface-raised);color:var(--text-muted);font-size:.58rem}.preview-list,.branch-list,.package-list{display:grid;gap:.45rem}.preview-list article,.branch-list>div,.package-list button{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.6rem;border:1px solid var(--border-soft);border-radius:.65rem;background:var(--surface-raised);text-align:left}.preview-list article{display:grid;grid-template-columns:1fr auto}.preview-list article>div{display:flex;gap:.5rem;align-items:center}.preview-list details{grid-column:1/-1}.status,.tag-chip{padding:.14rem .38rem;border-radius:999px;background:color-mix(in srgb,var(--primary) 10%,var(--surface));font-size:.55rem}.branch-list small,.package-list span{display:block;color:var(--text-muted);font-size:.56rem}.tree-list{display:grid;max-height:22rem;overflow:auto;margin:.7rem 0;border:1px solid var(--border);border-radius:.65rem}.tree-list button{display:flex;justify-content:space-between;gap:.5rem;padding:.45rem .6rem;color:var(--text);border-bottom:1px solid var(--border-soft);background:transparent;text-align:left}.tree-list span{color:var(--text-muted);font-size:.55rem}.file-editor{display:grid;gap:.6rem;margin-top:.8rem;padding-top:.8rem;border-top:1px solid var(--border-soft)}.code-editor{min-height:16rem;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.mini-code{min-height:8rem;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.stats-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.6rem}.stats-row article{padding:.7rem;border:1px solid var(--border);border-radius:.75rem;background:var(--surface)}.stats-row span{display:block;color:var(--text-muted);font-size:.6rem}.stats-row strong{font-size:1.2rem}.data-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem}.data-columns pre,details pre,.tool-card>pre{max-height:28rem;overflow:auto;padding:.6rem;border-radius:.6rem;background:var(--surface-raised);color:var(--text);font-size:.58rem}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:.67rem}th,td{padding:.58rem;border-bottom:1px solid var(--border-soft);text-align:left;vertical-align:top}th{color:var(--text-muted)}.tag-chip{margin:.08rem;border:0;color:var(--primary-strong);cursor:pointer}.cleanup-warning{display:flex;gap:.7rem;padding:.8rem;border:1px solid color-mix(in srgb,var(--warning) 30%,var(--border));border-radius:.85rem;background:color-mix(in srgb,var(--warning) 5%,var(--surface));color:var(--warning)}.cleanup-warning div{display:grid}.cleanup-warning span{font-size:.65rem}.danger-button{color:white;background:var(--danger)}.danger-text{color:var(--danger)!important}.empty{color:var(--text-muted)}@media(max-width:980px){.control-strip,.cols-3,.data-columns{grid-template-columns:1fr}.cols-2{grid-template-columns:1fr}.stats-row{grid-template-columns:repeat(2,1fr)}}@media(max-width:600px){.stats-row{grid-template-columns:1fr 1fr}.preview-list article{grid-template-columns:1fr}.preview-list article select{width:100%}}
 </style>
