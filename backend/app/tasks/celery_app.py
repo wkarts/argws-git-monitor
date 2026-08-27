@@ -17,7 +17,12 @@ celery_app = Celery(
     "argws_git_monitor",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.jobs", "app.tasks.inactivity", "app.tasks.platform"],
+    include=[
+        "app.tasks.jobs",
+        "app.tasks.inactivity",
+        "app.tasks.platform",
+        "app.tasks.backup_lifecycle",
+    ],
 )
 celery_app.conf.update(
     task_serializer="json",
