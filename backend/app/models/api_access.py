@@ -22,7 +22,7 @@ class ApiAccessKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     prefix: Mapped[str] = mapped_column(String(24), nullable=False)
-    token_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_digest: Mapped[str] = mapped_column(String(255), nullable=False)
     scopes: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
