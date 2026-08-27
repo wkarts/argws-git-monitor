@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
-  Activity, Bell, ChevronDown, ChevronLeft, ChevronRight, CircleDotDashed,
+  Activity, Bell, Braces, ChevronDown, ChevronLeft, ChevronRight, CircleDotDashed,
   ClipboardList, DatabaseBackup, FileText, Github, GitPullRequest, LayoutDashboard,
   ListChecks, LogOut, Menu, MoreHorizontal, PlayCircle, Server, Settings,
   ShieldAlert, Stethoscope, Tag, UserRound, Users, Wrench, X
@@ -39,6 +39,7 @@ const navItems = computed(() => [
   { to: '/releases', label: 'Releases', icon: Tag },
   { to: '/issues', label: 'Issues', icon: CircleDotDashed },
   { to: '/github-tools', label: 'GitHub Tools', icon: Wrench },
+  { to: '/api-access', label: 'API & Integrações', icon: Braces },
   { to: '/backup-recovery', label: 'Backup & Recovery', icon: DatabaseBackup },
   { to: '/deployments', label: 'Deployments', icon: Server },
   { to: '/repository-clinic', label: 'Repository Clinic', icon: Stethoscope },
@@ -233,7 +234,9 @@ onBeforeUnmount(() => {
         <RouterLink to="/releases"><Tag :size="19"/><span>Releases</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/issues"><CircleDotDashed :size="19"/><span>Issues</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/github-tools"><Wrench :size="19"/><span>GitHub Tools</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/api-access"><Braces :size="19"/><span>API & Integrações</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/backup-recovery"><DatabaseBackup :size="19"/><span>Backup & Recovery</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/backup-complete"><DatabaseBackup :size="19"/><span>Backup completo</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/deployments"><Server :size="19"/><span>Deployments</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/repository-clinic"><Stethoscope :size="19"/><span>Repository Clinic</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/compliance"><ShieldAlert :size="19"/><span>Conformidade</span><ChevronRight :size="16"/></RouterLink>
