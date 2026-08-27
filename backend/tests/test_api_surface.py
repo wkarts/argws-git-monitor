@@ -103,12 +103,15 @@ def test_openapi_exposes_v060_realtime_and_control_operations() -> None:
 
 
 def test_websocket_route_is_registered_outside_openapi() -> None:
-    websocket_paths = {
-        getattr(route, "path", "")
+    websocket_routes = [
+        route
         for route in app.routes
-        if route.__class__.__name__ == "APIWebSocketRoute"
-    }
-    assert "/api/v1/realtime/ws" in websocket_paths
+        if route.__class__.__name__.endswith("WebSocketRoute")
+    ]
+    assert any(
+        getattr(route, "path", "") == "/api/v1/realtime/ws"
+        for route in websocket_routes
+    )
 
 
 @pytest.mark.asyncio
