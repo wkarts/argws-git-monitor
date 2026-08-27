@@ -12,6 +12,7 @@ const router = createRouter({
       path: '/', component: AppShell, meta: { requiresAuth: true }, children: [
         { path: '', name: 'dashboard', component: () => import('../views/DashboardView.vue'), meta: { title: 'Visão geral' } },
         { path: 'repositories', name: 'repositories', component: () => import('../views/RepositoriesView.vue'), meta: { title: 'Repositórios' } },
+        { path: 'repositories/blacklist', name: 'repository-blacklist', component: () => import('../views/RepositoryBlacklistView.vue'), meta: { title: 'Lista negra de repositórios' } },
         { path: 'repositories/:id', name: 'repository-detail', component: () => import('../views/RepositoryDetailView.vue'), meta: { title: 'Detalhes do repositório' } },
         { path: 'pull-requests', name: 'pull-requests', component: () => import('../views/PullRequestsView.vue'), meta: { title: 'Pull Requests' } },
         { path: 'actions', name: 'actions', component: () => import('../views/ActionsView.vue'), meta: { title: 'GitHub Actions' } },
