@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from app.api.routes.webhooks import _backup_trigger_for_event, _event_summary
-from app.services.api_access import ApiAccessError, generate_api_token, normalize_scopes
+from app.services.api_access import (
+    ApiAccessError,
+    _verify_token,
+    generate_api_token,
+    normalize_scopes,
+)
 from app.services.webhook_provisioning import REALTIME_EVENTS, ensure_repository_webhook
 
 
@@ -12,7 +17,10 @@ def test_api_access_key_generation_and_scope_normalization() -> None:
 
     assert token.startswith(f"agm_{prefix}_")
     assert len(prefix) == 12
-    assert len(digest) == 64
+    assert digest.startswith("$argon2id$")
+    assert len(digest) <= 255
+    assert _verify_token(token, digest) is True
+    assert _verify_token(f"{token}-invalid", digest) is False
     assert normalize_scopes(
         ["repositories:read", "monitoring:read", "repositories:read"]
     ) == ["monitoring:read", "repositories:read"]
