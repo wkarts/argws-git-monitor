@@ -50,7 +50,7 @@ celery_app.conf.update(
         },
         "ensure-realtime-github-webhooks": {
             "task": "realtime.ensure_repository_webhooks",
-            "schedule": 300.0,
+            "schedule": 60.0,
         },
         "evaluate-inactivity-policies": {
             "task": "inactivity.evaluate_all",
