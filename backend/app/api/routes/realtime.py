@@ -28,11 +28,17 @@ async def create_realtime_ticket(current_user: CurrentUser) -> dict[str, object]
     return await issue_websocket_ticket(current_user.id)
 
 
-@router.websocket("/ws")
 async def websocket_events(
     websocket: WebSocket,
     ticket: str = Query(min_length=20, max_length=256),
 ) -> None:
+    """Canal realtime registrado diretamente na aplicação FastAPI.
+
+    O endpoint permanece fora do OpenAPI, como esperado para WebSocket. O registro
+    direto evita depender da propagação de WebSocket routes via include_router e é
+    validado pela suíte de rotas da aplicação.
+    """
+
     settings = get_settings()
     origin = websocket.headers.get("origin")
     if origin and origin not in settings.cors_origin_list:
