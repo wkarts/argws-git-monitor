@@ -54,6 +54,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
+      - name: Validar autoversionamento SemVer
+        run: |
+          python scripts/test_auto_version.py
+          python scripts/auto_version.py verify "$(cat VERSION)"
       - run: pip install pyyaml cryptography pillow
       - run: python scripts/validate-package.py
       - run: python scripts/validate-deploy-layout.py
