@@ -15,6 +15,7 @@ from app.api.routes import (
     admin,
     admin_permissions,
     auth,
+    backup_lifecycle,
     compliance_local,
     dashboard,
     github,
@@ -144,6 +145,7 @@ app.include_router(repositories.router, prefix=settings.api_v1_prefix)
 app.include_router(repository_controls.router, prefix=settings.api_v1_prefix)
 app.include_router(operations.router, prefix=settings.api_v1_prefix)
 app.include_router(platform.router, prefix=settings.api_v1_prefix)
+app.include_router(backup_lifecycle.router, prefix=settings.api_v1_prefix)
 app.include_router(realtime.router, prefix=settings.api_v1_prefix)
 app.include_router(monitoring_api.router, prefix=settings.api_v1_prefix)
 app.include_router(notifications.router, prefix=settings.api_v1_prefix)
