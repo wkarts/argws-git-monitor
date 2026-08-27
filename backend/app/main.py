@@ -147,6 +147,10 @@ app.include_router(operations.router, prefix=settings.api_v1_prefix)
 app.include_router(platform.router, prefix=settings.api_v1_prefix)
 app.include_router(backup_lifecycle.router, prefix=settings.api_v1_prefix)
 app.include_router(realtime.router, prefix=settings.api_v1_prefix)
+app.websocket(
+    f"{settings.api_v1_prefix}/realtime/ws",
+    name="realtime-websocket",
+)(realtime.websocket_events)
 app.include_router(monitoring_api.router, prefix=settings.api_v1_prefix)
 app.include_router(notifications.router, prefix=settings.api_v1_prefix)
 app.include_router(webhooks.router, prefix=settings.api_v1_prefix)
