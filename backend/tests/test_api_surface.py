@@ -25,6 +25,19 @@ EXPECTED_OPERATIONAL_PATHS = {
     "/api/v1/repositories/{repository_id}/github",
     "/api/v1/repositories/{repository_id}/monitoring",
     "/api/v1/repositories/{repository_id}/delete-github",
+    "/api/v1/repository-controls/blacklist",
+    "/api/v1/repository-controls/{repository_id}/blacklist",
+    "/api/v1/repository-controls/{repository_id}/actions",
+    "/api/v1/realtime/ticket",
+    "/api/v1/monitoring/overview",
+    "/api/v1/monitoring/runtime",
+    "/api/v1/api-access/scopes",
+    "/api/v1/api-access/keys",
+    "/api/v1/api-access/keys/{key_id}",
+    "/api/v1/external/v1/status",
+    "/api/v1/external/v1/repositories",
+    "/api/v1/external/v1/repositories/{repository_id}/actions",
+    "/api/v1/backup-lifecycle/{repository_id}/complete",
     "/api/v1/operations/status",
     "/api/v1/operations/actions",
     "/api/v1/operations/pull-requests",
@@ -48,7 +61,7 @@ def test_operational_routes_are_registered() -> None:
     assert not missing, f"Rotas operacionais ausentes: {sorted(missing)}"
 
 
-def test_openapi_exposes_v040_control_center_operations() -> None:
+def test_openapi_exposes_v060_realtime_and_control_operations() -> None:
     paths = app.openapi()["paths"]
 
     assert "post" in paths["/api/v1/auth/2fa/setup"]
@@ -72,6 +85,29 @@ def test_openapi_exposes_v040_control_center_operations() -> None:
     assert "patch" in paths["/api/v1/repositories/{repository_id}/github"]
     assert "delete" in paths["/api/v1/repositories/{repository_id}/monitoring"]
     assert "post" in paths["/api/v1/repositories/{repository_id}/delete-github"]
+
+    assert "get" in paths["/api/v1/repository-controls/blacklist"]
+    assert "post" in paths["/api/v1/repository-controls/{repository_id}/blacklist"]
+    assert "delete" in paths["/api/v1/repository-controls/{repository_id}/blacklist"]
+    assert "get" in paths["/api/v1/repository-controls/{repository_id}/actions"]
+    assert "put" in paths["/api/v1/repository-controls/{repository_id}/actions"]
+    assert "post" in paths["/api/v1/realtime/ticket"]
+    assert "get" in paths["/api/v1/monitoring/overview"]
+    assert "get" in paths["/api/v1/monitoring/runtime"]
+    assert "post" in paths["/api/v1/api-access/keys"]
+    assert "delete" in paths["/api/v1/api-access/keys/{key_id}"]
+    assert "get" in paths["/api/v1/external/v1/status"]
+    assert "get" in paths["/api/v1/external/v1/repositories"]
+    assert "put" in paths["/api/v1/external/v1/repositories/{repository_id}/actions"]
+    assert "post" in paths["/api/v1/backup-lifecycle/{repository_id}/complete"]
+
+
+def test_websocket_route_is_registered_outside_openapi() -> None:
+    registered_paths = {
+        getattr(route, "path", "")
+        for route in app.routes
+    }
+    assert "/api/v1/realtime/ws" in registered_paths
 
 
 @pytest.mark.asyncio

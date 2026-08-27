@@ -17,7 +17,13 @@ celery_app = Celery(
     "argws_git_monitor",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.jobs", "app.tasks.inactivity", "app.tasks.platform"],
+    include=[
+        "app.tasks.jobs",
+        "app.tasks.inactivity",
+        "app.tasks.platform",
+        "app.tasks.backup_lifecycle",
+        "app.tasks.realtime",
+    ],
 )
 celery_app.conf.update(
     task_serializer="json",
@@ -41,6 +47,10 @@ celery_app.conf.update(
         "sync-all-github-connections": {
             "task": "github.sync_all_connections",
             "schedule": FULL_SYNC_INTERVAL_SECONDS,
+        },
+        "ensure-realtime-github-webhooks": {
+            "task": "realtime.ensure_repository_webhooks",
+            "schedule": 60.0,
         },
         "evaluate-inactivity-policies": {
             "task": "inactivity.evaluate_all",

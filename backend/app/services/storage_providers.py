@@ -6,7 +6,7 @@ import os
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import httpx
 
@@ -17,6 +17,12 @@ from app.services.ssh_security import configure_ssh_host_keys
 
 class StorageProviderError(RuntimeError):
     pass
+
+
+def _file_chunks(path: Path, chunk_size: int = 8 * 1024 * 1024) -> Iterator[bytes]:
+    with path.open("rb") as stream:
+        while chunk := stream.read(chunk_size):
+            yield chunk
 
 
 class StorageAdapter(ABC):
@@ -73,6 +79,7 @@ class LocalStorageAdapter(StorageAdapter):
 
 class S3StorageAdapter(StorageAdapter):
     def __init__(self, config: dict[str, Any], secret: dict[str, Any], *, minio: bool = False) -> None:
+        del minio
         try:
             import boto3
         except ImportError as exc:
@@ -117,59 +124,157 @@ class S3StorageAdapter(StorageAdapter):
 
 
 class DropboxStorageAdapter(StorageAdapter):
+    SIMPLE_UPLOAD_LIMIT = 140 * 1024 * 1024
+    CHUNK_SIZE = 8 * 1024 * 1024
+
     def __init__(self, config: dict[str, Any], secret: dict[str, Any]) -> None:
         self.token = str(secret.get("access_token") or "")
+        self.refresh_token = str(secret.get("refresh_token") or "")
+        self.client_id = str(secret.get("client_id") or config.get("client_id") or "")
+        self.client_secret = str(secret.get("client_secret") or "")
         self.base = "/" + str(config.get("base_path") or "argws-git-monitor").strip("/")
-        if not self.token:
-            raise StorageProviderError("access_token do Dropbox é obrigatório.")
+        if not self.token and not (self.refresh_token and self.client_id and self.client_secret):
+            raise StorageProviderError(
+                "Informe access_token ou refresh_token + client_id + client_secret do Dropbox."
+            )
+
+    def _access_token(self) -> str:
+        if self.refresh_token:
+            response = httpx.post(
+                "https://api.dropboxapi.com/oauth2/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+                timeout=30,
+            )
+            if not response.is_success:
+                raise StorageProviderError(
+                    f"Dropbox não renovou a credencial: HTTP {response.status_code}."
+                )
+            token = str(response.json().get("access_token") or "")
+            if not token:
+                raise StorageProviderError("Dropbox não retornou access_token na renovação.")
+            return token
+        return self.token
+
+    def _headers(self, *, api_arg: dict[str, Any] | None = None) -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {self._access_token()}"}
+        if api_arg is not None:
+            headers["Content-Type"] = "application/octet-stream"
+            headers["Dropbox-API-Arg"] = json.dumps(api_arg, separators=(",", ":"))
+        return headers
 
     def test(self) -> dict[str, Any]:
         response = httpx.post(
             "https://api.dropboxapi.com/2/users/get_current_account",
-            headers={"Authorization": f"Bearer {self.token}"},
+            headers=self._headers(),
             timeout=30,
         )
         response.raise_for_status()
-        return {"account_id": response.json().get("account_id"), "ok": True}
+        return {"account_id": response.json().get("account_id"), "ok": True, "oauth_refresh": bool(self.refresh_token)}
+
+    def _simple_upload(self, local_path: Path, path: str) -> None:
+        response = httpx.post(
+            "https://content.dropboxapi.com/2/files/upload",
+            headers=self._headers(api_arg={"path": path, "mode": "overwrite", "autorename": False}),
+            content=_file_chunks(local_path, self.CHUNK_SIZE),
+            timeout=600,
+        )
+        response.raise_for_status()
+
+    def _session_upload(self, local_path: Path, path: str) -> None:
+        token = self._access_token()
+        auth = {"Authorization": f"Bearer {token}", "Content-Type": "application/octet-stream"}
+        size = local_path.stat().st_size
+        with local_path.open("rb") as stream:
+            first = stream.read(self.CHUNK_SIZE)
+            response = httpx.post(
+                "https://content.dropboxapi.com/2/files/upload_session/start",
+                headers={
+                    **auth,
+                    "Dropbox-API-Arg": json.dumps({"close": False}, separators=(",", ":")),
+                },
+                content=first,
+                timeout=300,
+            )
+            response.raise_for_status()
+            session_id = str(response.json().get("session_id") or "")
+            if not session_id:
+                raise StorageProviderError("Dropbox não retornou upload session id.")
+            offset = len(first)
+            while offset < size:
+                chunk = stream.read(self.CHUNK_SIZE)
+                if not chunk:
+                    break
+                final = offset + len(chunk) >= size
+                cursor = {"session_id": session_id, "offset": offset}
+                if final:
+                    response = httpx.post(
+                        "https://content.dropboxapi.com/2/files/upload_session/finish",
+                        headers={
+                            **auth,
+                            "Dropbox-API-Arg": json.dumps(
+                                {
+                                    "cursor": cursor,
+                                    "commit": {
+                                        "path": path,
+                                        "mode": "overwrite",
+                                        "autorename": False,
+                                        "mute": True,
+                                    },
+                                },
+                                separators=(",", ":"),
+                            ),
+                        },
+                        content=chunk,
+                        timeout=600,
+                    )
+                else:
+                    response = httpx.post(
+                        "https://content.dropboxapi.com/2/files/upload_session/append_v2",
+                        headers={
+                            **auth,
+                            "Dropbox-API-Arg": json.dumps(
+                                {"cursor": cursor, "close": False}, separators=(",", ":")
+                            ),
+                        },
+                        content=chunk,
+                        timeout=600,
+                    )
+                response.raise_for_status()
+                offset += len(chunk)
 
     def upload(self, local_path: Path, remote_key: str) -> str:
         path = f"{self.base}/{remote_key}".replace("//", "/")
-        response = httpx.post(
-            "https://content.dropboxapi.com/2/files/upload",
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/octet-stream",
-                "Dropbox-API-Arg": json.dumps({"path": path, "mode": "overwrite"}),
-            },
-            content=local_path.read_bytes(),
-            timeout=300,
-        )
-        response.raise_for_status()
+        if local_path.stat().st_size <= self.SIMPLE_UPLOAD_LIMIT:
+            self._simple_upload(local_path, path)
+        else:
+            self._session_upload(local_path, path)
         return f"dropbox:{path}"
 
     def download(self, location: str, local_path: Path) -> Path:
         path = location.removeprefix("dropbox:")
-        response = httpx.post(
-            "https://content.dropboxapi.com/2/files/download",
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Dropbox-API-Arg": json.dumps({"path": path}),
-            },
-            timeout=300,
-        )
-        response.raise_for_status()
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_bytes(response.content)
+        with httpx.stream(
+            "POST",
+            "https://content.dropboxapi.com/2/files/download",
+            headers=self._headers(api_arg={"path": path}),
+            timeout=600,
+        ) as response:
+            response.raise_for_status()
+            with local_path.open("wb") as stream:
+                for chunk in response.iter_bytes(self.CHUNK_SIZE):
+                    stream.write(chunk)
         return local_path
 
     def delete(self, location: str) -> None:
         path = location.removeprefix("dropbox:")
         response = httpx.post(
             "https://api.dropboxapi.com/2/files/delete_v2",
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-            },
+            headers={**self._headers(), "Content-Type": "application/json"},
             json={"path": path},
             timeout=30,
         )
@@ -177,14 +282,43 @@ class DropboxStorageAdapter(StorageAdapter):
 
 
 class GoogleDriveStorageAdapter(StorageAdapter):
+    CHUNK_SIZE = 8 * 1024 * 1024
+
     def __init__(self, config: dict[str, Any], secret: dict[str, Any]) -> None:
         self.token = str(secret.get("access_token") or "")
+        self.refresh_token = str(secret.get("refresh_token") or "")
+        self.client_id = str(secret.get("client_id") or config.get("client_id") or "")
+        self.client_secret = str(secret.get("client_secret") or "")
         self.folder_id = str(config.get("folder_id") or "")
-        if not self.token:
-            raise StorageProviderError("access_token do Google Drive é obrigatório.")
+        if not self.token and not (self.refresh_token and self.client_id and self.client_secret):
+            raise StorageProviderError(
+                "Informe access_token ou refresh_token + client_id + client_secret do Google Drive."
+            )
+
+    def _access_token(self) -> str:
+        if self.refresh_token:
+            response = httpx.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+                timeout=30,
+            )
+            if not response.is_success:
+                raise StorageProviderError(
+                    f"Google Drive não renovou a credencial: HTTP {response.status_code}."
+                )
+            token = str(response.json().get("access_token") or "")
+            if not token:
+                raise StorageProviderError("Google Drive não retornou access_token na renovação.")
+            return token
+        return self.token
 
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.token}"}
+        return {"Authorization": f"Bearer {self._access_token()}"}
 
     def test(self) -> dict[str, Any]:
         response = httpx.get(
@@ -194,44 +328,73 @@ class GoogleDriveStorageAdapter(StorageAdapter):
             timeout=30,
         )
         response.raise_for_status()
-        return {"user": response.json().get("user"), "ok": True}
+        return {"user": response.json().get("user"), "ok": True, "oauth_refresh": bool(self.refresh_token)}
 
     def upload(self, local_path: Path, remote_key: str) -> str:
         metadata: dict[str, Any] = {"name": remote_key.replace("/", "__")}
         if self.folder_id:
             metadata["parents"] = [self.folder_id]
-        boundary = "argws_boundary_7cfc6d"
-        body = io.BytesIO()
-        body.write(
-            f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode()
-        )
-        body.write(json.dumps(metadata).encode())
-        body.write(
-            f"\r\n--{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
-        )
-        body.write(local_path.read_bytes())
-        body.write(f"\r\n--{boundary}--\r\n".encode())
-        response = httpx.post(
+        size = local_path.stat().st_size
+        token = self._access_token()
+        start = httpx.post(
             "https://www.googleapis.com/upload/drive/v3/files",
-            headers={**self._headers(), "Content-Type": f"multipart/related; boundary={boundary}"},
-            params={"uploadType": "multipart", "fields": "id,name,size,md5Checksum"},
-            content=body.getvalue(),
-            timeout=300,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=UTF-8",
+                "X-Upload-Content-Type": "application/octet-stream",
+                "X-Upload-Content-Length": str(size),
+            },
+            params={"uploadType": "resumable", "fields": "id,name,size,md5Checksum"},
+            json=metadata,
+            timeout=60,
         )
-        response.raise_for_status()
-        return f"gdrive:{response.json()['id']}"
+        start.raise_for_status()
+        session_url = start.headers.get("location")
+        if not session_url:
+            raise StorageProviderError("Google Drive não retornou URL de upload resumível.")
+
+        result: dict[str, Any] = {}
+        with local_path.open("rb") as stream:
+            offset = 0
+            while offset < size:
+                chunk = stream.read(self.CHUNK_SIZE)
+                if not chunk:
+                    break
+                end = offset + len(chunk) - 1
+                response = httpx.put(
+                    session_url,
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "Content-Length": str(len(chunk)),
+                        "Content-Range": f"bytes {offset}-{end}/{size}",
+                    },
+                    content=chunk,
+                    timeout=600,
+                )
+                if response.status_code not in {200, 201, 308}:
+                    response.raise_for_status()
+                if response.status_code in {200, 201}:
+                    result = response.json()
+                offset = end + 1
+        file_id = str(result.get("id") or "")
+        if not file_id:
+            raise StorageProviderError("Google Drive não confirmou o arquivo após upload resumível.")
+        return f"gdrive:{file_id}"
 
     def download(self, location: str, local_path: Path) -> Path:
         file_id = location.removeprefix("gdrive:")
-        response = httpx.get(
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        with httpx.stream(
+            "GET",
             f"https://www.googleapis.com/drive/v3/files/{file_id}",
             headers=self._headers(),
             params={"alt": "media"},
-            timeout=300,
-        )
-        response.raise_for_status()
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        local_path.write_bytes(response.content)
+            timeout=600,
+        ) as response:
+            response.raise_for_status()
+            with local_path.open("wb") as stream:
+                for chunk in response.iter_bytes(self.CHUNK_SIZE):
+                    stream.write(chunk)
         return local_path
 
     def delete(self, location: str) -> None:

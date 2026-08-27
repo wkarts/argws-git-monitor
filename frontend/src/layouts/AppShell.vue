@@ -2,13 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
-  Activity, Bell, ChevronDown, ChevronLeft, ChevronRight, CircleDotDashed,
+  Activity, Bell, Braces, ChevronDown, ChevronLeft, ChevronRight, CircleDotDashed,
   ClipboardList, DatabaseBackup, FileText, Github, GitPullRequest, LayoutDashboard,
   ListChecks, LogOut, Menu, MoreHorizontal, PlayCircle, Server, Settings,
   ShieldAlert, Stethoscope, Tag, UserRound, Users, Wrench, X
 } from 'lucide-vue-next'
 import AppLogo from '../components/AppLogo.vue'
 import { api } from '../services/api'
+import { REALTIME_EVENT, type RealtimeEvent } from '../services/realtime'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 import type { DashboardData, QueueOverview } from '../types/api'
@@ -27,6 +28,8 @@ const queueActive = ref(0)
 const knownNotificationIds = new Set<string>()
 let notificationsInitialized = false
 let refreshTimer: number | undefined
+let realtimeRefreshTimer: number | undefined
+let shellRefreshing = false
 
 const navItems = computed(() => [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -36,6 +39,7 @@ const navItems = computed(() => [
   { to: '/releases', label: 'Releases', icon: Tag },
   { to: '/issues', label: 'Issues', icon: CircleDotDashed },
   { to: '/github-tools', label: 'GitHub Tools', icon: Wrench },
+  { to: '/api-access', label: 'API & Integrações', icon: Braces },
   { to: '/backup-recovery', label: 'Backup & Recovery', icon: DatabaseBackup },
   { to: '/deployments', label: 'Deployments', icon: Server },
   { to: '/repository-clinic', label: 'Repository Clinic', icon: Stethoscope },
@@ -70,7 +74,8 @@ function toggleSidebar(): void {
 }
 
 async function refreshShellData(): Promise<void> {
-  if (!online.value) return
+  if (!online.value || shellRefreshing) return
+  shellRefreshing = true
   try {
     const [dashboard, queue] = await Promise.all([
       api.get<DashboardData>('/dashboard'), api.get<QueueOverview>('/jobs/overview')
@@ -103,7 +108,22 @@ async function refreshShellData(): Promise<void> {
       }
     }
   } catch { /* A página ativa mostrará erros específicos. */ }
+  finally { shellRefreshing = false }
 }
+
+function handleRealtime(event: Event): void {
+  const detail = (event as CustomEvent<RealtimeEvent>).detail
+  if (!detail || detail.type === 'realtime.heartbeat' || detail.type === 'realtime.connected') return
+  if (!(
+    detail.type.startsWith('job.')
+    || detail.type.startsWith('github.')
+    || detail.type.startsWith('repository.')
+    || detail.type.startsWith('notification.')
+  )) return
+  window.clearTimeout(realtimeRefreshTimer)
+  realtimeRefreshTimer = window.setTimeout(() => void refreshShellData(), 250)
+}
+
 async function logout(): Promise<void> {
   userMenuOpen.value = false
   mobileMoreOpen.value = false
@@ -132,13 +152,18 @@ onMounted(() => {
   window.addEventListener('online', updateOnlineState)
   window.addEventListener('offline', updateOnlineState)
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener(REALTIME_EVENT, handleRealtime)
   void refreshShellData()
-  refreshTimer = window.setInterval(refreshShellData, 30000)
+  // WebSocket é o caminho normal. Este timer é somente fallback de reconciliação
+  // para proxy bloqueando WS, evento perdido ou restauração de conectividade.
+  refreshTimer = window.setInterval(refreshShellData, 300000)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('online', updateOnlineState)
   window.removeEventListener('offline', updateOnlineState)
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener(REALTIME_EVENT, handleRealtime)
+  window.clearTimeout(realtimeRefreshTimer)
   if (refreshTimer) window.clearInterval(refreshTimer)
 })
 </script>
@@ -162,7 +187,7 @@ onBeforeUnmount(() => {
         <div class="monitor-heading"><span>Monitoramento</span><i /></div>
         <strong>{{online?'Interface online':'Desconectado'}}</strong>
         <small v-if="queueActive">{{queueActive}} job(s) ativo(s)</small>
-        <small v-else>Consulte Fila para validar workers</small>
+        <small v-else>Realtime ativo; fila reservada a tarefas pesadas</small>
         <svg viewBox="0 0 180 56" fill="none"><path d="M1 48C19 44 22 34 38 36c17 2 20 13 38 7 16-5 22-24 40-20 18 4 21 18 38 10 12-5 17-20 25-30" stroke="url(#a)" stroke-width="2.2"/><path d="M1 53c20-2 27-10 43-8 20 2 25 8 42 4 19-4 22-13 39-11 20 2 25 10 54 1" stroke="url(#b)" stroke-width="1.7"/><defs><linearGradient id="a"><stop stop-color="#2563EB"/><stop offset="1" stop-color="#8B5CF6"/></linearGradient><linearGradient id="b"><stop stop-color="#22D3EE"/><stop offset="1" stop-color="#6366F1"/></linearGradient></defs></svg>
       </div>
     </aside>
@@ -209,7 +234,9 @@ onBeforeUnmount(() => {
         <RouterLink to="/releases"><Tag :size="19"/><span>Releases</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/issues"><CircleDotDashed :size="19"/><span>Issues</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/github-tools"><Wrench :size="19"/><span>GitHub Tools</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/api-access"><Braces :size="19"/><span>API & Integrações</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/backup-recovery"><DatabaseBackup :size="19"/><span>Backup & Recovery</span><ChevronRight :size="16"/></RouterLink>
+        <RouterLink to="/backup-complete"><DatabaseBackup :size="19"/><span>Backup completo</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/deployments"><Server :size="19"/><span>Deployments</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/repository-clinic"><Stethoscope :size="19"/><span>Repository Clinic</span><ChevronRight :size="16"/></RouterLink>
         <RouterLink to="/compliance"><ShieldAlert :size="19"/><span>Conformidade</span><ChevronRight :size="16"/></RouterLink>

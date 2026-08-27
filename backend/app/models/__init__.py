@@ -6,6 +6,7 @@ from app.models.activity import (
     SyncJobStatus,
     WebhookDelivery,
 )
+from app.models.api_access import ApiAccessKey
 from app.models.base import Base
 from app.models.github import (
     ConnectionStatus,
@@ -46,6 +47,7 @@ from app.models.user import RefreshToken, User
 
 __all__ = [
     "ActionClass",
+    "ApiAccessKey",
     "AuditLog",
     "BackupPolicy",
     "BackupSnapshot",
