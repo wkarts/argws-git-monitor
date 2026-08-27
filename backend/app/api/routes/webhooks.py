@@ -4,17 +4,20 @@ import hashlib
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.core.config import get_settings
-from app.models.activity import SyncJobStatus, WebhookDelivery
+from app.models.activity import NotificationSeverity, SyncJobStatus, WebhookDelivery
 from app.models.github import GitHubConnection, Repository
 from app.models.platform import BackupPolicy
 from app.services.github_mapping import parse_github_datetime
+from app.services.health import FAILURE_CONCLUSIONS
 from app.services.job_queue import create_job
+from app.services.notifications import create_notification
 from app.services.realtime import publish_event
 from app.services.webhook_security import verify_github_signature
 from app.tasks.jobs import sync_repository_task
@@ -82,7 +85,10 @@ def _apply_webhook_delta(repository: Repository, event: str, payload: dict, now:
     if event == "push":
         head = payload.get("head_commit") or {}
         repository.pushed_at = parse_github_datetime(head.get("timestamp")) or now
-        repository.latest_commit_sha = str(payload.get("after") or head.get("id") or "") or repository.latest_commit_sha
+        repository.latest_commit_sha = (
+            str(payload.get("after") or head.get("id") or "")
+            or repository.latest_commit_sha
+        )
         repository.latest_commit_message = head.get("message") or repository.latest_commit_message
         author = head.get("author") or {}
         repository.latest_commit_author = (
@@ -132,6 +138,101 @@ def _apply_webhook_delta(repository: Repository, event: str, payload: dict, now:
             repository.open_issue_count = max(repository.open_issue_count - 1, 0)
 
 
+async def _create_critical_notification(
+    db: DbSession,
+    *,
+    user_id,
+    repository: Repository,
+    event: str,
+    payload: dict[str, Any],
+    delivery_id: str,
+    previous_workflow_conclusion: str | None,
+) -> dict[str, object] | None:
+    """Persiste alertas que não podem esperar a reconciliação Celery.
+
+    O webhook delivery id já é idempotente, e o delta é aplicado antes do full-sync.
+    Assim a reconciliação posterior enxerga o mesmo workflow/release e não replica o
+    alerta de transição.
+    """
+
+    notification = None
+    if event == "workflow_run":
+        run = payload.get("workflow_run") or {}
+        conclusion = str(run.get("conclusion") or "").lower()
+        if run.get("status") != "completed":
+            return None
+        if conclusion in FAILURE_CONCLUSIONS:
+            notification = await create_notification(
+                db,
+                user_id=user_id,
+                repository_id=repository.id,
+                event_type="workflow.failed",
+                severity=NotificationSeverity.ERROR,
+                title=f"Build falhou: {repository.full_name}",
+                message=(
+                    f"{run.get('name') or repository.latest_workflow_name or 'Workflow'} "
+                    f"terminou como {conclusion}."
+                ),
+                url=run.get("html_url") or repository.latest_workflow_url,
+                payload={
+                    "run_id": run.get("id"),
+                    "conclusion": conclusion,
+                    "delivery_id": delivery_id,
+                    "source": "github_webhook",
+                },
+            )
+        elif conclusion == "success" and previous_workflow_conclusion in FAILURE_CONCLUSIONS:
+            notification = await create_notification(
+                db,
+                user_id=user_id,
+                repository_id=repository.id,
+                event_type="workflow.recovered",
+                severity=NotificationSeverity.SUCCESS,
+                title=f"Build recuperada: {repository.full_name}",
+                message=(
+                    f"{run.get('name') or repository.latest_workflow_name or 'Workflow'} "
+                    "voltou a concluir com sucesso."
+                ),
+                url=run.get("html_url") or repository.latest_workflow_url,
+                payload={
+                    "run_id": run.get("id"),
+                    "delivery_id": delivery_id,
+                    "source": "github_webhook",
+                },
+            )
+
+    elif event == "release" and payload.get("action") in {"published", "released"}:
+        release = payload.get("release") or {}
+        tag = str(release.get("tag_name") or repository.latest_release_tag or "").strip()
+        notification = await create_notification(
+            db,
+            user_id=user_id,
+            repository_id=repository.id,
+            event_type="release.published",
+            severity=NotificationSeverity.SUCCESS,
+            title=f"Nova release: {repository.full_name}",
+            message=f"A versão {tag or 'sem tag'} foi publicada.",
+            url=release.get("html_url"),
+            payload={
+                "tag": tag or None,
+                "release_id": release.get("id"),
+                "delivery_id": delivery_id,
+                "source": "github_webhook",
+            },
+        )
+
+    if notification is None:
+        return None
+    return {
+        "notification_id": str(notification.id),
+        "event_type": notification.event_type,
+        "severity": notification.severity,
+        "title": notification.title,
+        "message": notification.message,
+        "url": notification.url,
+    }
+
+
 @router.post("/github", status_code=status.HTTP_202_ACCEPTED)
 async def github_webhook(request: Request, db: DbSession):
     settings = get_settings()
@@ -170,6 +271,7 @@ async def github_webhook(request: Request, db: DbSession):
     sync_jobs: list[tuple[Repository, object]] = []
     backup_jobs: list[tuple[BackupPolicy, Repository, object]] = []
     realtime_events: list[tuple[object, Repository, str, dict[str, object]]] = []
+    notification_events: list[tuple[object, Repository, dict[str, object]]] = []
     if full_name and event in EVENT_SOURCE:
         result = await db.execute(
             select(Repository, GitHubConnection.user_id)
@@ -184,6 +286,7 @@ async def github_webhook(request: Request, db: DbSession):
         backup_trigger = _backup_trigger_for_event(event, payload)
 
         for repository, user_id in result.all():
+            previous_workflow_conclusion = repository.latest_workflow_conclusion
             _apply_webhook_delta(repository, event, payload, now)
             evidence = dict((repository.extra_data or {}).get("activity_sources") or {})
             item = {"at": now.isoformat(), "summary": summary}
@@ -202,6 +305,19 @@ async def github_webhook(request: Request, db: DbSession):
                 "activity_observed_at": now.isoformat(),
                 "last_webhook_delivery": delivery_id,
             }
+
+            notification_data = await _create_critical_notification(
+                db,
+                user_id=user_id,
+                repository=repository,
+                event=event,
+                payload=payload,
+                delivery_id=delivery_id,
+                previous_workflow_conclusion=previous_workflow_conclusion,
+            )
+            if notification_data:
+                notification_events.append((user_id, repository, notification_data))
+
             realtime_events.append(
                 (
                     user_id,
@@ -224,7 +340,7 @@ async def github_webhook(request: Request, db: DbSession):
                 kind=f"webhook.{event}",
                 label=f"Webhook {event} · {repository.full_name}",
                 progress_total=1,
-                message="Evento aplicado em tempo real; aguardando reconciliação detalhada.",
+                message="Evento e alertas críticos aplicados; aguardando reconciliação detalhada.",
             )
             sync_jobs.append((repository, job))
 
@@ -249,15 +365,26 @@ async def github_webhook(request: Request, db: DbSession):
                         kind=f"repository.backup.event.{backup_trigger}",
                         label=f"Backup por evento · {policy.name} · {repository.full_name}",
                         progress_total=5,
-                        message=(
-                            f"Evento {backup_trigger} recebido; backup aguardando worker."
-                        ),
+                        message=f"Evento {backup_trigger} recebido; backup aguardando worker.",
                     )
                     backup_jobs.append((policy, repository, backup_job))
 
-    # Persiste primeiro entrega, deltas de atividade e jobs. O evento realtime só é
-    # emitido depois do commit, portanto o cliente pode reler a API imediatamente.
+    # Persiste primeiro entrega, deltas, notificações e jobs. Os eventos realtime
+    # são emitidos só depois do commit para que qualquer releitura da API já veja
+    # o mesmo estado que originou a mensagem do WebSocket.
     await db.commit()
+
+    for user_id, repository, notification_data in notification_events:
+        try:
+            await publish_event(
+                user_id,
+                "notification.created",
+                notification_data,
+                repository_id=repository.id,
+                correlation_id=delivery_id,
+            )
+        except Exception as exc:
+            logger.debug("Falha ao publicar notificação %s em realtime: %s", delivery_id, exc)
 
     for user_id, repository, event_type, event_data in realtime_events:
         try:
@@ -314,6 +441,7 @@ async def github_webhook(request: Request, db: DbSession):
         "status": "accepted",
         "delivery_id": delivery_id,
         "realtime": len(realtime_events),
+        "notifications": len(notification_events),
         "queued": queued,
         "failed": failed,
         "backup_queued": backup_queued,
