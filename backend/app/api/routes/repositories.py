@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
@@ -32,6 +33,7 @@ from app.services.github_client import GitHubAPIError
 from app.services.github_mapping import apply_repository_base
 from app.services.github_sync import get_repository_client
 from app.services.job_queue import create_job
+from app.services.realtime import publish_event
 from app.services.worker_status import require_worker
 from app.tasks.jobs import sync_repository_task
 
@@ -50,6 +52,25 @@ async def _owned_repository(
     if not repository:
         raise HTTPException(status_code=404, detail="Repositório não encontrado.")
     return repository
+
+
+def _blacklist(repository: Repository, *, reason: str, remote_deleted: bool = False) -> None:
+    now = datetime.now(UTC)
+    extra = dict(repository.extra_data or {})
+    extra["blacklist"] = {
+        "at": now.isoformat(),
+        "reason": reason,
+        "github_id": repository.github_id,
+        "full_name": repository.full_name,
+    }
+    if remote_deleted:
+        extra["remote_deleted"] = {
+            "at": now.isoformat(),
+            "full_name": repository.full_name,
+        }
+    repository.extra_data = extra
+    repository.monitoring_enabled = False
+    repository.sync_error = None
 
 
 @router.get("", response_model=PaginatedResponse[RepositoryRead])
@@ -145,9 +166,24 @@ async def update_repository(
     db: DbSession,
 ) -> RepositoryRead:
     repository = await _owned_repository(db, repository_id, current_user.id)
-    repository.monitoring_enabled = payload.monitoring_enabled
+    if payload.monitoring_enabled:
+        extra = dict(repository.extra_data or {})
+        extra.pop("blacklist", None)
+        repository.extra_data = extra
+        repository.monitoring_enabled = True
+    else:
+        _blacklist(repository, reason="Monitoramento desativado pelo usuário.")
     await db.commit()
     await db.refresh(repository)
+    try:
+        await publish_event(
+            current_user.id,
+            "repository.monitoring_changed",
+            {"full_name": repository.full_name, "enabled": repository.monitoring_enabled},
+            repository_id=repository.id,
+        )
+    except Exception:
+        pass
     return RepositoryRead.model_validate(repository)
 
 
@@ -192,10 +228,25 @@ async def remove_from_monitor(
 ) -> MessageResponse:
     repository = await _owned_repository(db, repository_id, current_user.id)
     full_name = repository.full_name
-    await db.delete(repository)
+    _blacklist(
+        repository,
+        reason="Ocultado permanentemente do monitor pelo usuário.",
+    )
     await db.commit()
+    try:
+        await publish_event(
+            current_user.id,
+            "repository.blacklisted",
+            {"full_name": full_name, "github_id": repository.github_id},
+            repository_id=repository.id,
+        )
+    except Exception:
+        pass
     return MessageResponse(
-        message=f"{full_name} removido somente do monitor. O repositório no GitHub não foi alterado."
+        message=(
+            f"{full_name} foi colocado na lista negra do monitor. "
+            "O repositório no GitHub não foi alterado e não voltará após sincronizações."
+        )
     )
 
 
@@ -226,10 +277,26 @@ async def delete_from_github(
         await client.close()
 
     full_name = repository.full_name
-    await db.delete(repository)
+    _blacklist(
+        repository,
+        reason="Repositório excluído manualmente do GitHub; tombstone local preservado.",
+        remote_deleted=True,
+    )
     await db.commit()
+    try:
+        await publish_event(
+            current_user.id,
+            "repository.deleted_remote",
+            {"full_name": full_name, "github_id": repository.github_id},
+            repository_id=repository.id,
+        )
+    except Exception:
+        pass
     return MessageResponse(
-        message=f"{full_name} foi excluído definitivamente do GitHub e do monitor."
+        message=(
+            f"{full_name} foi excluído definitivamente do GitHub. "
+            "O Git Monitor preservou somente o tombstone local para backups, auditoria e para impedir reimportação."
+        )
     )
 
 
@@ -240,6 +307,11 @@ async def sync_repository_now(
     db: DbSession,
 ) -> SyncAcceptedResponse:
     repository = await _owned_repository(db, repository_id, current_user.id)
+    if not repository.monitoring_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Repositório está na lista negra; remova-o da lista negra antes de sincronizar.",
+        )
     try:
         await require_worker()
     except RuntimeError as exc:
@@ -262,7 +334,7 @@ async def sync_repository_now(
     job.celery_task_id = task.id
     await db.commit()
     return SyncAcceptedResponse(
-        message="Sincronização enviada ao worker e registrada na fila.",
+        message="Reconciliação detalhada enviada ao worker; eventos imediatos continuam via realtime.",
         task_id=task.id,
         job_id=job.id,
     )
