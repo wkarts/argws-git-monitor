@@ -14,7 +14,9 @@ from app.api.routes import (
     notifications,
     operations,
     platform,
+    realtime,
     repositories,
+    repository_controls,
     system,
     webhooks,
 )
@@ -35,7 +37,9 @@ __all__ = [
     "notifications",
     "operations",
     "platform",
+    "realtime",
     "repositories",
+    "repository_controls",
     "system",
     "webhooks",
 ]
