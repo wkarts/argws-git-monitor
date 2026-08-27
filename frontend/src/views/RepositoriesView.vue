@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { AlertTriangle, ChevronLeft, ChevronRight, Clock3, Github, Plus, Search, SlidersHorizontal, Wrench, X } from 'lucide-vue-next'
+import { AlertTriangle, Ban, ChevronLeft, ChevronRight, Clock3, Github, Plus, Search, SlidersHorizontal, Wrench, X } from 'lucide-vue-next'
 import EmptyState from '../components/EmptyState.vue'
 import RepositoryCard from '../components/RepositoryCard.vue'
 import { ApiError, api } from '../services/api'
@@ -88,7 +88,7 @@ onBeforeUnmount(()=>{
 
 <template>
   <div class="page-stack">
-    <section class="page-heading"><div><span class="eyebrow">CATÁLOGO MONITORADO</span><h2>Repositórios GitHub</h2><p>Pesquise, filtre, sincronize, altere visibilidade e gerencie cada projeto conectado.</p></div><div class="heading-actions"><div v-if="repositories" class="result-counter"><strong>{{ repositories.total }}</strong><span>monitorados</span></div><RouterLink class="button secondary" to="/github-tools"><Wrench :size="16" />GitHub Tools</RouterLink><RouterLink class="button secondary" to="/inactivity"><Clock3 :size="16" />Inatividade</RouterLink><button class="button primary" :disabled="!usableConnections.length" @click="showCreate = true"><Plus :size="16" />Novo repositório</button></div></section>
+    <section class="page-heading"><div><span class="eyebrow">CATÁLOGO MONITORADO</span><h2>Repositórios GitHub</h2><p>Pesquise, filtre, sincronize, altere visibilidade e gerencie cada projeto conectado.</p></div><div class="heading-actions"><div v-if="repositories" class="result-counter"><strong>{{ repositories.total }}</strong><span>monitorados</span></div><RouterLink class="button secondary" to="/repositories/blacklist"><Ban :size="16" />Lista negra</RouterLink><RouterLink class="button secondary" to="/github-tools"><Wrench :size="16" />GitHub Tools</RouterLink><RouterLink class="button secondary" to="/inactivity"><Clock3 :size="16" />Inatividade</RouterLink><button class="button primary" :disabled="!usableConnections.length" @click="showCreate = true"><Plus :size="16" />Novo repositório</button></div></section>
 
     <section v-if="showCreate" class="create-panel"><header><div><span class="eyebrow">CRIAR NO GITHUB</span><h3>Novo repositório</h3></div><button class="icon-button" @click="showCreate=false"><X :size="17" /></button></header><form @submit.prevent="createRepository"><label class="field"><span>Conta GitHub</span><select v-model="createForm.connection_id" required><option v-for="connection in usableConnections" :key="connection.id" :value="connection.id">@{{ connection.github_login }} · {{ connection.name }}</option></select></label><label class="field"><span>Nome</span><input v-model="createForm.name" placeholder="meu-projeto" required /></label><label class="field wide"><span>Descrição</span><input v-model="createForm.description" maxlength="350" /></label><label class="check-option"><input v-model="createForm.private" type="checkbox" /><span>Privado</span></label><label class="check-option"><input v-model="createForm.auto_init" type="checkbox" /><span>Inicializar README</span></label><button class="button primary" :disabled="creating">{{ creating ? 'Criando…' : 'Criar e monitorar' }}</button></form><p>Para criar ou alterar repositórios, o token precisa da permissão <strong>Administration: write</strong>.</p></section>
 
