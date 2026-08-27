@@ -22,6 +22,7 @@ celery_app = Celery(
         "app.tasks.inactivity",
         "app.tasks.platform",
         "app.tasks.backup_lifecycle",
+        "app.tasks.realtime",
     ],
 )
 celery_app.conf.update(
@@ -46,6 +47,10 @@ celery_app.conf.update(
         "sync-all-github-connections": {
             "task": "github.sync_all_connections",
             "schedule": FULL_SYNC_INTERVAL_SECONDS,
+        },
+        "ensure-realtime-github-webhooks": {
+            "task": "realtime.ensure_repository_webhooks",
+            "schedule": 300.0,
         },
         "evaluate-inactivity-policies": {
             "task": "inactivity.evaluate_all",
