@@ -59,6 +59,7 @@ def complete_backup_lifecycle_task(self, job_id: str, params: dict[str, Any]):
                 job_id=uuid.UUID(job_id),
             )
             complete_export = (snapshot.manifest or {}).get("github_complete_export") or {}
+            warnings = list((snapshot.manifest or {}).get("warnings") or [])
             if not snapshot.checksum_sha256 or not complete_export.get("checksum_sha256"):
                 raise RuntimeError("Backup não possui os dois checksums necessários para validação.")
 
@@ -71,6 +72,11 @@ def complete_backup_lifecycle_task(self, job_id: str, params: dict[str, Any]):
 
             deleted = False
             if delete_after:
+                if warnings:
+                    raise RuntimeError(
+                        "O backup terminou com advertências e foi preservado, mas a exclusão remota foi bloqueada. "
+                        "Para excluir com segurança, execute novamente até obter cobertura completa sem warnings."
+                    )
                 connection = await session.get(GitHubConnection, repository.connection_id)
                 if not connection or connection.user_id != user_id or not connection.token_encrypted:
                     raise RuntimeError("Conexão GitHub inválida; exclusão cancelada e backup preservado.")
@@ -108,7 +114,7 @@ def complete_backup_lifecycle_task(self, job_id: str, params: dict[str, Any]):
                 "size_bytes": snapshot.size_bytes,
                 "object_count": snapshot.object_count,
                 "deleted_from_github": deleted,
-                "warnings": (snapshot.manifest or {}).get("warnings") or [],
+                "warnings": warnings,
             }
 
         await update_job_progress(
@@ -136,7 +142,13 @@ def complete_backup_lifecycle_task(self, job_id: str, params: dict[str, Any]):
     try:
         return run_async(execute())
     except Exception as exc:
-        run_async(mark_job_failed(job_id, error=str(exc), message="Backup completo não foi concluído; exclusão não executada."))
+        run_async(
+            mark_job_failed(
+                job_id,
+                error=str(exc),
+                message="Backup completo não foi concluído; exclusão não executada.",
+            )
+        )
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc, countdown=60)
         raise
