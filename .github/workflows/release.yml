@@ -16,73 +16,112 @@ concurrency:
 
 jobs:
   prepare:
-    name: Preparar versão
+    name: Preparar versão automática
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       major_minor: ${{ steps.version.outputs.major_minor }}
-      release_required: ${{ steps.release_state.outputs.release_required }}
+      bump: ${{ steps.version.outputs.bump }}
+      previous_tag: ${{ steps.version.outputs.previous_tag }}
+      release_required: ${{ steps.version.outputs.release_required }}
+      release_ready: ${{ steps.materialize.outputs.release_ready }}
+      release_sha: ${{ steps.materialize.outputs.release_sha }}
+      release_short_sha: ${{ steps.materialize.outputs.release_short_sha }}
     steps:
-      - name: Checkout
+      - name: Checkout completo
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Validar e obter versão
+      - name: Testar resolvedor SemVer
+        run: python scripts/test_auto_version.py
+
+      - name: Calcular próxima versão
         id: version
         shell: bash
-        run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          import re
-          import tomllib
-          from pathlib import Path
+        run: python scripts/auto_version.py resolve --github-output "$GITHUB_OUTPUT" --json
 
-          backend = tomllib.loads(Path("backend/pyproject.toml").read_text(encoding="utf-8"))
-          frontend = json.loads(Path("frontend/package.json").read_text(encoding="utf-8"))
-          declared_version = Path("VERSION").read_text(encoding="utf-8").strip()
-
-          backend_version = backend["project"]["version"]
-          frontend_version = frontend["version"]
-
-          if len({backend_version, frontend_version, declared_version}) != 1:
-              raise SystemExit(
-                  "Versões divergentes: "
-                  f"backend={backend_version} frontend={frontend_version} VERSION={declared_version}"
-              )
-
-          if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", backend_version):
-              raise SystemExit(f"Versão semântica inválida: {backend_version}")
-
-          numeric = backend_version.split("-", 1)[0].split("+", 1)[0]
-          major, minor, _patch = numeric.split(".", 2)
-
-          print(f"version={backend_version}")
-          print(f"tag=v{backend_version}")
-          print(f"major_minor={major}.{minor}")
-          PY
-
-      - name: Verificar se a versão já foi publicada
-        id: release_state
+      - name: Materializar e persistir versão
+        id: materialize
         shell: bash
         env:
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_REQUIRED: ${{ steps.version.outputs.release_required }}
+          BUMP: ${{ steps.version.outputs.bump }}
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            echo "release_required=false" >> "$GITHUB_OUTPUT"
-            echo "A tag ${RELEASE_TAG} já existe. O GHCR latest/sha será atualizado sem duplicar a release."
-          else
-            echo "release_required=true" >> "$GITHUB_OUTPUT"
-            echo "A tag ${RELEASE_TAG} ainda não existe. A release será criada após as validações."
+          set -Eeuo pipefail
+
+          ORIGINAL_SHA="$(git rev-parse HEAD)"
+
+          if [[ "${RELEASE_REQUIRED}" != "true" ]]; then
+            echo "release_ready=false" >> "$GITHUB_OUTPUT"
+            echo "release_sha=${ORIGINAL_SHA}" >> "$GITHUB_OUTPUT"
+            echo "release_short_sha=${ORIGINAL_SHA:0:7}" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Autoversionamento"
+              echo
+              echo "Nenhuma nova release é necessária para este commit."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+
+          # Nunca força a main. Se outro merge avançou a branch durante esta execução,
+          # a próxima execução do workflow absorverá todas as mudanças desde a última tag.
+          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          if [[ "${REMOTE_MAIN}" != "${ORIGINAL_SHA}" ]]; then
+            echo "release_ready=false" >> "$GITHUB_OUTPUT"
+            echo "release_sha=${REMOTE_MAIN}" >> "$GITHUB_OUTPUT"
+            echo "release_short_sha=${REMOTE_MAIN:0:7}" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Autoversionamento adiado"
+              echo
+              echo "A main avançou durante a execução. Nenhum push forçado foi feito."
+              echo "A próxima execução recalculará a versão considerando os novos commits."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          python scripts/auto_version.py apply "${VERSION}"
+          python scripts/auto_version.py verify "${VERSION}"
+          git diff --check
+
+          if ! git diff --quiet -- VERSION backend/pyproject.toml frontend/package.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add VERSION backend/pyproject.toml frontend/package.json
+            git commit -m "chore(release): v${VERSION} [skip release]"
+            RELEASE_SHA="$(git rev-parse HEAD)"
+            git push origin HEAD:main
+          else
+            RELEASE_SHA="${ORIGINAL_SHA}"
+          fi
+
+          echo "release_ready=true" >> "$GITHUB_OUTPUT"
+          echo "release_sha=${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "release_short_sha=${RELEASE_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Autoversionamento SemVer"
+            echo
+            echo "- Versão anterior: \`${PREVIOUS_TAG:-sem tag}\`"
+            echo "- Incremento detectado: \`${BUMP}\`"
+            echo "- Próxima versão: \`${VERSION}\`"
+            echo "- Commit de release: \`${RELEASE_SHA}\`"
+            echo "- VERSION, backend/pyproject.toml e frontend/package.json sincronizados automaticamente."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   validate:
     name: Validar aplicação e deploys
+    needs: prepare
+    if: needs.prepare.outputs.release_required == 'true' && needs.prepare.outputs.release_ready == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout do commit versionado
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
 
       - name: Configurar Python
         uses: actions/setup-python@v7
@@ -90,6 +129,11 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
+
+      - name: Validar autoversionamento
+        run: |
+          python scripts/test_auto_version.py
+          python scripts/auto_version.py verify "${{ needs.prepare.outputs.version }}"
 
       - name: Validar backend
         working-directory: backend
@@ -145,6 +189,7 @@ jobs:
     needs:
       - prepare
       - validate
+    if: needs.prepare.outputs.release_required == 'true' && needs.prepare.outputs.release_ready == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -160,8 +205,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Checkout
+      - name: Checkout do commit versionado
         uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
 
       - name: Configurar QEMU
         uses: docker/setup-qemu-action@v3
@@ -186,12 +233,12 @@ jobs:
             org.opencontainers.image.description=Componente ${{ matrix.component }} do ARGWS Git Monitor
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.release_sha }}
           tags: |
             type=raw,value=latest
-            type=sha,prefix=sha-,format=short
-            type=raw,value=${{ needs.prepare.outputs.version }},enable=${{ needs.prepare.outputs.release_required == 'true' }}
-            type=raw,value=${{ needs.prepare.outputs.major_minor }},enable=${{ needs.prepare.outputs.release_required == 'true' }}
+            type=raw,value=sha-${{ needs.prepare.outputs.release_short_sha }}
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.major_minor }}
 
       - name: Build multi-arquitetura e publicar
         id: build
@@ -215,6 +262,7 @@ jobs:
             echo "### ${{ matrix.image }}"
             echo
             echo "- Versão: \`${{ needs.prepare.outputs.version }}\`"
+            echo "- Commit: \`${{ needs.prepare.outputs.release_sha }}\`"
             echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
             echo "- Plataformas: \`linux/amd64\`, \`linux/arm64\`"
             echo "- Tags:"
@@ -228,6 +276,7 @@ jobs:
     needs:
       - prepare
       - images
+    if: needs.prepare.outputs.release_required == 'true' && needs.prepare.outputs.release_ready == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -250,19 +299,16 @@ jobs:
           WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/argws-git-monitor-web
           VERSION: ${{ needs.prepare.outputs.version }}
           MAJOR_MINOR: ${{ needs.prepare.outputs.major_minor }}
-          RELEASE_REQUIRED: ${{ needs.prepare.outputs.release_required }}
+          SHORT_SHA: ${{ needs.prepare.outputs.release_short_sha }}
         run: |
           set -Eeuo pipefail
 
-          docker buildx imagetools inspect "${API_IMAGE}:latest"
-          docker buildx imagetools inspect "${WEB_IMAGE}:latest"
-
-          if [[ "${RELEASE_REQUIRED}" == "true" ]]; then
-            docker buildx imagetools inspect "${API_IMAGE}:${VERSION}"
-            docker buildx imagetools inspect "${WEB_IMAGE}:${VERSION}"
-            docker buildx imagetools inspect "${API_IMAGE}:${MAJOR_MINOR}"
-            docker buildx imagetools inspect "${WEB_IMAGE}:${MAJOR_MINOR}"
-          fi
+          for image in "${API_IMAGE}" "${WEB_IMAGE}"; do
+            docker buildx imagetools inspect "${image}:latest"
+            docker buildx imagetools inspect "${image}:${VERSION}"
+            docker buildx imagetools inspect "${image}:${MAJOR_MINOR}"
+            docker buildx imagetools inspect "${image}:sha-${SHORT_SHA}"
+          done
 
       - name: Registrar referências validadas
         shell: bash
@@ -270,12 +316,9 @@ jobs:
           {
             echo "## Imagens GHCR verificadas"
             echo
-            echo "- \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-api:latest\`"
-            echo "- \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-web:latest\`"
-            if [[ "${{ needs.prepare.outputs.release_required }}" == "true" ]]; then
-              echo "- \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-api:${{ needs.prepare.outputs.version }}\`"
-              echo "- \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-web:${{ needs.prepare.outputs.version }}\`"
-            fi
+            echo "- \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-api:${{ needs.prepare.outputs.version }}\`"
+            echo "- \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-web:${{ needs.prepare.outputs.version }}\`"
+            echo "- \`latest\`, \`${{ needs.prepare.outputs.major_minor }}\` e \`sha-${{ needs.prepare.outputs.release_short_sha }}\` validadas."
           } >> "$GITHUB_STEP_SUMMARY"
 
   release:
@@ -283,15 +326,19 @@ jobs:
     needs:
       - prepare
       - verify_images
-    if: needs.prepare.outputs.release_required == 'true'
+    if: needs.prepare.outputs.release_required == 'true' && needs.prepare.outputs.release_ready == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout
+      - name: Checkout do commit versionado
         uses: actions/checkout@v6
         with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
           fetch-depth: 0
+
+      - name: Confirmar versão embarcada
+        run: python scripts/auto_version.py verify "${{ needs.prepare.outputs.version }}"
 
       - name: Gerar pacotes de instalação
         id: package
@@ -340,7 +387,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.prepare.outputs.release_sha }}
           name: ARGWS Git Monitor ${{ needs.prepare.outputs.tag }}
           generate_release_notes: true
           make_latest: true
@@ -357,7 +404,11 @@ jobs:
           {
             echo "## Release publicada"
             echo
+            echo "- Versão calculada automaticamente: \`${{ needs.prepare.outputs.version }}\`"
+            echo "- Incremento SemVer: \`${{ needs.prepare.outputs.bump }}\`"
+            echo "- Tag anterior: \`${{ needs.prepare.outputs.previous_tag }}\`"
             echo "- Tag Git: \`${{ needs.prepare.outputs.tag }}\`"
+            echo "- Commit versionado: \`${{ needs.prepare.outputs.release_sha }}\`"
             echo "- API GHCR: \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-api:${{ needs.prepare.outputs.version }}\`"
             echo "- Web GHCR: \`ghcr.io/${{ github.repository_owner }}/argws-git-monitor-web:${{ needs.prepare.outputs.version }}\`"
             echo "- Pacote completo: ZIP e TAR.GZ"
