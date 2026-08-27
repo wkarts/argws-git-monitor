@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import secrets
 import uuid
 from datetime import UTC, datetime
 
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
+from argon2.low_level import Type
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.models.api_access import ApiAccessKey
 
 API_SCOPES = {
@@ -19,6 +19,19 @@ API_SCOPES = {
     "backups:read": "Consultar backups e snapshots.",
     "backups:write": "Solicitar backups e restaurações autorizadas.",
 }
+
+# Chaves de API são credenciais de longa duração. Mesmo sendo geradas com alta
+# entropia, armazenamos somente Argon2id para que um vazamento do banco não
+# permita validação offline barata das credenciais. Os parâmetros mantêm custo
+# relevante sem transformar cada chamada da API externa em uma operação pesada.
+_api_key_hasher = PasswordHasher(
+    time_cost=2,
+    memory_cost=19_456,
+    parallelism=1,
+    hash_len=32,
+    salt_len=16,
+    type=Type.ID,
+)
 
 
 class ApiAccessError(RuntimeError):
@@ -35,16 +48,22 @@ def normalize_scopes(scopes: list[str]) -> list[str]:
     return normalized
 
 
-def _digest(token: str) -> str:
-    key = get_settings().app_secret_key.encode("utf-8")
-    return hmac.new(key, token.encode("utf-8"), hashlib.sha256).hexdigest()
+def _hash_token(token: str) -> str:
+    return _api_key_hasher.hash(token)
+
+
+def _verify_token(token: str, encoded_hash: str) -> bool:
+    try:
+        return _api_key_hasher.verify(encoded_hash, token)
+    except (VerifyMismatchError, InvalidHashError):
+        return False
 
 
 def generate_api_token() -> tuple[str, str, str]:
     prefix = secrets.token_hex(6)
     secret = secrets.token_urlsafe(32)
     token = f"agm_{prefix}_{secret}"
-    return token, prefix, _digest(token)
+    return token, prefix, _hash_token(token)
 
 
 async def authenticate_api_token(session: AsyncSession, token: str) -> ApiAccessKey:
@@ -65,8 +84,12 @@ async def authenticate_api_token(session: AsyncSession, token: str) -> ApiAccess
         expires_at = key.expires_at if key.expires_at.tzinfo else key.expires_at.replace(tzinfo=UTC)
         if expires_at <= now:
             raise ApiAccessError("Chave de API expirada.")
-    if not hmac.compare_digest(key.token_digest, _digest(token)):
+    if not _verify_token(token, key.token_digest):
         raise ApiAccessError("Chave de API inválida.")
+
+    # Permite aumentar o custo do Argon2id futuramente sem invalidar chaves.
+    if _api_key_hasher.check_needs_rehash(key.token_digest):
+        key.token_digest = _hash_token(token)
     key.last_used_at = now
     await session.flush()
     return key
