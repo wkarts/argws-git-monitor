@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Clock3, Github, Plus, Search,
 import EmptyState from '../components/EmptyState.vue'
 import RepositoryCard from '../components/RepositoryCard.vue'
 import { ApiError, api } from '../services/api'
+import { REALTIME_EVENT, type RealtimeEvent } from '../services/realtime'
 import { useToastStore } from '../stores/toast'
 import type { GitHubConnection, HealthStatus, PaginatedResponse, Repository } from '../types/api'
 
@@ -21,11 +22,12 @@ const showCreate = ref(false)
 const creating = ref(false)
 const createForm = reactive({ connection_id: '', name: '', description: '', private: true, auto_init: true })
 let debounceTimer: number | undefined
+let realtimeTimer: number | undefined
 
 const usableConnections = computed(() => connections.value.filter((item) => item.status === 'active'))
 
 function buildQuery(): string {
-  const params = new URLSearchParams({ page: String(page.value), page_size: '24' })
+  const params = new URLSearchParams({ page: String(page.value), page_size: '24', monitoring_enabled: 'true' })
   if (query.value.trim()) params.set('q', query.value.trim())
   if (health.value) params.set('health', health.value)
   if (privacy.value !== 'all') params.set('private', String(privacy.value === 'private'))
@@ -54,7 +56,7 @@ async function createRepository(): Promise<void> {
     const created = await api.post<Repository>(`/github/connections/${createForm.connection_id}/repositories`, {
       name: createForm.name.trim(), description: createForm.description.trim() || null, private: createForm.private, auto_init: createForm.auto_init
     })
-    toasts.success('Repositório criado', `${created.full_name} já foi incluído no monitor; acompanhe a sincronização na Fila.`)
+    toasts.success('Repositório criado', `${created.full_name} já foi incluído no monitor; os eventos seguintes chegarão em tempo real.`)
     Object.assign(createForm, { connection_id: usableConnections.value[0]?.id || '', name: '', description: '', private: true, auto_init: true })
     showCreate.value = false
     await load()
@@ -62,12 +64,26 @@ async function createRepository(): Promise<void> {
   finally { creating.value = false }
 }
 
+function handleRealtime(event: Event): void {
+  const detail = (event as CustomEvent<RealtimeEvent>).detail
+  if (!detail || (!detail.type.startsWith('github.') && !detail.type.startsWith('repository.'))) return
+  window.clearTimeout(realtimeTimer)
+  realtimeTimer = window.setTimeout(() => void load(), 180)
+}
+
 function resetFilters(): void { query.value=''; health.value=''; privacy.value='all'; page.value=1; void load() }
 function goToPage(target: number): void { if (!repositories.value || target<1 || target>repositories.value.pages) return; page.value=target; void load(); window.scrollTo({top:0,behavior:'smooth'}) }
 watch([health,privacy],()=>{page.value=1;void load()})
 watch(query,()=>{window.clearTimeout(debounceTimer);debounceTimer=window.setTimeout(()=>{page.value=1;void load()},400)})
-onMounted(load)
-onBeforeUnmount(()=>window.clearTimeout(debounceTimer))
+onMounted(() => {
+  window.addEventListener(REALTIME_EVENT, handleRealtime)
+  void load()
+})
+onBeforeUnmount(()=>{
+  window.clearTimeout(debounceTimer)
+  window.clearTimeout(realtimeTimer)
+  window.removeEventListener(REALTIME_EVENT, handleRealtime)
+})
 </script>
 
 <template>
