@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,8 +15,19 @@ from auto_version import (
     format_version,
     highest_bump,
     parse_semver,
+    resolve_release,
     verify_version,
 )
+
+
+def git(root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
 
 
 class AutoVersionTests(unittest.TestCase):
@@ -70,6 +83,59 @@ class AutoVersionTests(unittest.TestCase):
             )
             package = json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))
             self.assertEqual(package["version"], "0.6.0")
+
+    def test_resolve_real_git_history_and_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "backend").mkdir()
+            (root / "frontend").mkdir()
+            (root / "VERSION").write_text("0.5.0\n", encoding="utf-8")
+            (root / "backend" / "pyproject.toml").write_text(
+                '[project]\nname = "example"\nversion = "0.5.0"\n',
+                encoding="utf-8",
+            )
+            (root / "frontend" / "package.json").write_text(
+                json.dumps({"name": "example", "version": "0.5.0"}) + "\n",
+                encoding="utf-8",
+            )
+
+            git(root, "init", "-b", "main")
+            git(root, "config", "user.name", "CI")
+            git(root, "config", "user.email", "ci@example.invalid")
+            git(root, "add", ".")
+            git(root, "commit", "-m", "chore: base")
+            git(root, "tag", "v0.5.0")
+
+            (root / "feature.txt").write_text("realtime\n", encoding="utf-8")
+            git(root, "add", "feature.txt")
+            git(root, "commit", "-m", "feat: realtime e backup completo")
+
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                resolved = resolve_release(root)
+                self.assertEqual(resolved["previous_tag"], "v0.5.0")
+                self.assertEqual(resolved["bump"], "minor")
+                self.assertEqual(resolved["version"], "0.6.0")
+                self.assertEqual(resolved["tag"], "v0.6.0")
+                self.assertEqual(resolved["release_required"], "true")
+
+                apply_version(root, resolved["version"])
+                git(root, "add", "VERSION", "backend/pyproject.toml", "frontend/package.json")
+                git(root, "commit", "-m", "chore(release): v0.6.0 [skip release]")
+
+                # Se a publicação falhar antes da tag, o retry deve escolher a MESMA versão.
+                retry = resolve_release(root)
+                self.assertEqual(retry["version"], "0.6.0")
+                self.assertEqual(retry["release_required"], "true")
+
+                git(root, "tag", "v0.6.0")
+                already_published = resolve_release(root)
+                self.assertEqual(already_published["version"], "0.6.0")
+                self.assertEqual(already_published["release_required"], "false")
+                self.assertEqual(already_published["reason"], "head-already-tagged")
+            finally:
+                os.chdir(previous_cwd)
 
     def test_verify_detects_divergence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
