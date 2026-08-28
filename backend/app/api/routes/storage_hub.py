@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.github import GitHubConnection, Repository
-from app.models.platform import BackupSnapshot, BackupStatus, StorageProvider
+from app.models.platform import BackupPolicy, BackupSnapshot, BackupStatus, StorageProvider
+from app.services.internal_object_store import (
+    InternalObjectStoreError,
+    bucket_status,
+    delete_empty_bucket,
+    ensure_bucket,
+    probe,
+)
 from app.services.internal_storage import (
+    create_internal_bucket_provider,
     default_backup_provider,
     ensure_internal_storage_providers,
     is_managed_internal_provider,
+    is_system_internal_provider,
 )
 from app.services.job_queue import create_job
 from app.services.storage_providers import build_storage_adapter
@@ -22,6 +32,7 @@ from app.services.worker_status import require_worker
 from app.tasks.platform import backup_task
 from app.tasks.storage_hub import copy_snapshot_task
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/storage-hub", tags=["Storage Hub"])
 
 
@@ -37,6 +48,10 @@ class ManagedBackupRequest(BaseModel):
 
 class SnapshotCopyRequest(BaseModel):
     provider_id: uuid.UUID
+
+
+class InternalBucketCreate(BaseModel):
+    name: str = Field(min_length=3, max_length=32)
 
 
 def _allowed(user: CurrentUser, permission: str) -> bool:
@@ -69,21 +84,78 @@ async def _owned_repository(
     return repository
 
 
-def _provider_payload(provider: StorageProvider) -> dict[str, Any]:
+def _provider_payload(
+    provider: StorageProvider,
+    *,
+    storage_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     config = provider.config or {}
     storage_class = str(config.get("storage_class") or provider.kind)
+    state = storage_state or {}
     return {
         "id": str(provider.id),
         "name": provider.name,
         "kind": provider.kind,
         "storage_class": storage_class,
         "managed": is_managed_internal_provider(provider),
+        "system_default": is_system_internal_provider(provider),
         "role": config.get("role"),
         "bucket": config.get("bucket"),
+        "bucket_alias": config.get("bucket_alias"),
         "base_path": config.get("base_path") if is_managed_internal_provider(provider) else None,
         "enabled": provider.enabled,
         "secret_hint": provider.secret_hint,
+        "available": state.get("available"),
+        "has_objects": state.get("has_objects"),
+        "storage_error": state.get("error"),
     }
+
+
+async def _ensure_internal_bucket(provider: StorageProvider) -> dict[str, Any]:
+    config = provider.config or {}
+    if not (
+        is_managed_internal_provider(provider)
+        and config.get("storage_class") == "internal_s3"
+        and config.get("bucket")
+    ):
+        return {}
+    try:
+        await asyncio.to_thread(ensure_bucket, str(config["bucket"]))
+        state = await asyncio.to_thread(bucket_status, str(config["bucket"]))
+        return state
+    except Exception as exc:
+        logger.warning(
+            "Bucket interno indisponível: provider=%s error_type=%s",
+            provider.id,
+            type(exc).__name__,
+        )
+        return {
+            "available": False,
+            "has_objects": None,
+            "error": "MinIO interno indisponível. Verifique o serviço de object storage.",
+        }
+
+
+async def _providers_with_state(
+    providers: list[StorageProvider],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for provider in providers:
+        state: dict[str, Any] = {}
+        if (provider.config or {}).get("storage_class") == "internal_s3":
+            state = await _ensure_internal_bucket(provider)
+        elif (provider.config or {}).get("storage_class") == "internal_local":
+            try:
+                details = await asyncio.to_thread(build_storage_adapter(provider).test)
+                state = {"available": bool(details.get("writable", True)), "has_objects": None}
+            except Exception:
+                state = {
+                    "available": False,
+                    "has_objects": None,
+                    "error": "Staging local indisponível.",
+                }
+        result.append(_provider_payload(provider, storage_state=state))
+    return result
 
 
 @router.get("/overview")
@@ -91,6 +163,8 @@ async def storage_overview(
     current_user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
+    # A criação dos registros internos não depende do MinIO estar online. Assim um
+    # object store temporariamente indisponível nunca derruba a listagem de repos.
     await ensure_internal_storage_providers(db, user_id=current_user.id)
     await db.commit()
 
@@ -103,6 +177,8 @@ async def storage_overview(
             )
         ).scalars().all()
     )
+    provider_payloads = await _providers_with_state(providers)
+
     total_snapshots = int(
         await db.scalar(
             select(func.count(BackupSnapshot.id)).where(BackupSnapshot.user_id == current_user.id)
@@ -148,9 +224,30 @@ async def storage_overview(
             .limit(1)
         )
     ).scalar_one_or_none()
+    repository_count = int(
+        await db.scalar(
+            select(func.count(Repository.id))
+            .join(GitHubConnection, Repository.connection_id == GitHubConnection.id)
+            .where(
+                GitHubConnection.user_id == current_user.id,
+                Repository.monitoring_enabled.is_(True),
+            )
+        )
+        or 0
+    )
+
+    minio_state: dict[str, Any]
+    try:
+        minio_state = await asyncio.to_thread(probe)
+    except Exception as exc:
+        logger.warning("MinIO interno não respondeu: %s", type(exc).__name__)
+        minio_state = {
+            "available": False,
+            "error": "MinIO interno não respondeu.",
+        }
 
     return {
-        "providers": [_provider_payload(provider) for provider in providers],
+        "providers": provider_payloads,
         "stats": {
             "snapshots": total_snapshots,
             "completed": completed,
@@ -162,13 +259,123 @@ async def storage_overview(
                 if last_snapshot
                 else None
             ),
+            "repositories": repository_count,
         },
         "internal_storage": {
-            "object_store": "S3 interno (bucket-style, filesystem-backed)",
+            "object_store": "MinIO S3 interno",
+            "engine": "minio",
+            "available": bool(minio_state.get("available")),
+            "error": minio_state.get("error"),
+            "endpoint": minio_state.get("endpoint"),
             "local_staging": "Armazenamento local persistente",
-            "deployment_manifest_required": False,
+            "deployment_manifest_required": True,
         },
     }
+
+
+@router.post("/internal-buckets", status_code=status.HTTP_201_CREATED)
+async def create_internal_bucket(
+    payload: InternalBucketCreate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    _require(current_user, "backup.providers.manage")
+    try:
+        provider = await create_internal_bucket_provider(
+            db,
+            user_id=current_user.id,
+            alias=payload.name,
+        )
+        config = provider.config or {}
+        await asyncio.to_thread(ensure_bucket, str(config["bucket"]))
+        state = await asyncio.to_thread(bucket_status, str(config["bucket"]))
+        await db.commit()
+        await db.refresh(provider)
+        return _provider_payload(provider, storage_state=state)
+    except InternalObjectStoreError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("Falha ao criar bucket interno: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="MinIO interno indisponível; o bucket não foi criado.",
+        ) from exc
+
+
+@router.post("/internal-buckets/{provider_id}/test")
+async def test_internal_bucket(
+    provider_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    provider = await db.get(StorageProvider, provider_id)
+    if (
+        not provider
+        or provider.user_id != current_user.id
+        or not is_managed_internal_provider(provider)
+        or (provider.config or {}).get("storage_class") != "internal_s3"
+    ):
+        raise HTTPException(status_code=404, detail="Bucket interno não encontrado.")
+    state = await _ensure_internal_bucket(provider)
+    if state.get("available") is False:
+        raise HTTPException(status_code=503, detail=str(state.get("error") or "Bucket indisponível."))
+    return {"ok": True, **state}
+
+
+@router.delete("/internal-buckets/{provider_id}", status_code=204)
+async def remove_internal_bucket(
+    provider_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Response:
+    _require(current_user, "backup.providers.manage")
+    provider = await db.get(StorageProvider, provider_id)
+    if (
+        not provider
+        or provider.user_id != current_user.id
+        or not is_managed_internal_provider(provider)
+        or (provider.config or {}).get("storage_class") != "internal_s3"
+    ):
+        raise HTTPException(status_code=404, detail="Bucket interno não encontrado.")
+    if is_system_internal_provider(provider):
+        raise HTTPException(
+            status_code=409,
+            detail="O bucket principal do sistema não pode ser excluído. Crie e remova buckets adicionais livremente.",
+        )
+
+    snapshots = int(
+        await db.scalar(
+            select(func.count(BackupSnapshot.id)).where(BackupSnapshot.provider_id == provider.id)
+        )
+        or 0
+    )
+    policies = int(
+        await db.scalar(select(func.count(BackupPolicy.id)).where(BackupPolicy.provider_id == provider.id))
+        or 0
+    )
+    if snapshots or policies:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Bucket em uso por {snapshots} snapshot(s) e {policies} política(s). "
+                "Remova ou mova essas referências antes da exclusão."
+            ),
+        )
+
+    bucket = str((provider.config or {}).get("bucket") or "")
+    try:
+        await asyncio.to_thread(delete_empty_bucket, bucket)
+    except InternalObjectStoreError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("Falha ao excluir bucket interno: %s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="MinIO interno indisponível.") from exc
+
+    await db.delete(provider)
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.post("/backups/run")
@@ -190,6 +397,10 @@ async def run_managed_backup(
     if not provider or provider.user_id != current_user.id or not provider.enabled:
         raise HTTPException(status_code=404, detail="Provider de backup não encontrado ou desativado.")
 
+    if (provider.config or {}).get("storage_class") == "internal_s3":
+        state = await _ensure_internal_bucket(provider)
+        if state.get("available") is False:
+            raise HTTPException(status_code=503, detail=str(state.get("error")))
     try:
         await asyncio.to_thread(build_storage_adapter(provider).test)
     except Exception as exc:
@@ -264,6 +475,10 @@ async def copy_snapshot(
     if source.provider_id == target.id:
         raise HTTPException(status_code=409, detail="O snapshot já está neste provider.")
 
+    if (target.config or {}).get("storage_class") == "internal_s3":
+        state = await _ensure_internal_bucket(target)
+        if state.get("available") is False:
+            raise HTTPException(status_code=503, detail=str(state.get("error")))
     try:
         await asyncio.to_thread(build_storage_adapter(target).test)
         await require_worker()
