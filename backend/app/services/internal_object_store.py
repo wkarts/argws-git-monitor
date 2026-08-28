@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import uuid
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote
 
 from botocore.config import Config
 from botocore.exceptions import ClientError
@@ -15,6 +19,7 @@ class InternalObjectStoreError(RuntimeError):
 
 
 _BUCKET_ALIAS = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+_LOCAL_SCHEME = "argws-local-bucket://"
 
 
 def user_bucket_prefix(user_id: uuid.UUID) -> str:
@@ -50,8 +55,46 @@ def _client():
         aws_access_key_id=settings.minio_internal_access_key,
         aws_secret_access_key=settings.internal_minio_secret,
         region_name=settings.minio_internal_region,
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            connect_timeout=2,
+            read_timeout=4,
+            retries={"max_attempts": 1},
+        ),
     )
+
+
+def _fallback_root() -> Path:
+    root = Path(get_settings().internal_object_fallback_root)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _bucket_dir(bucket: str) -> Path:
+    if not bucket or "/" in bucket or "\\" in bucket or bucket in {".", ".."}:
+        raise InternalObjectStoreError("Nome de bucket interno inválido.")
+    root = _fallback_root().resolve()
+    target = (root / bucket).resolve()
+    if not str(target).startswith(str(root) + os.sep):
+        raise InternalObjectStoreError("Bucket fora da raiz interna permitida.")
+    return target
+
+
+def _object_path(bucket: str, key: str) -> Path:
+    base = _bucket_dir(bucket).resolve()
+    target = (base / key.lstrip("/")).resolve()
+    if not str(target).startswith(str(base) + os.sep):
+        raise InternalObjectStoreError("Objeto fora do bucket interno permitido.")
+    return target
+
+
+def _fallback_probe() -> dict[str, Any]:
+    root = _fallback_root()
+    probe_file = root / ".argws-object-store-write-test"
+    probe_file.write_text("ok", encoding="utf-8")
+    probe_file.unlink(missing_ok=True)
+    return {"available": True, "path": str(root)}
 
 
 def _is_missing_bucket(exc: ClientError) -> bool:
@@ -61,36 +104,82 @@ def _is_missing_bucket(exc: ClientError) -> bool:
     return status == 404 or code in {"404", "NoSuchBucket", "NotFound"}
 
 
+def _minio_error(exc: Exception) -> str:
+    if isinstance(exc, ClientError):
+        response = getattr(exc, "response", {}) or {}
+        code = str((response.get("Error") or {}).get("Code") or "")
+        if code in {"AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch"}:
+            return "MinIO respondeu, mas recusou a credencial interna."
+    return "MinIO não respondeu; o storage local de contingência foi ativado."
+
+
+def _fallback_has_objects(bucket: str) -> bool:
+    directory = _bucket_dir(bucket)
+    if not directory.exists():
+        return False
+    return any(item.is_file() for item in directory.rglob("*"))
+
+
+def _ensure_fallback_bucket(bucket: str) -> tuple[Path, bool]:
+    directory = _bucket_dir(bucket)
+    created = not directory.exists()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory, created
+
+
 def ensure_bucket(bucket: str) -> dict[str, Any]:
-    client = _client()
     settings = get_settings()
-    created = False
     try:
-        client.head_bucket(Bucket=bucket)
-    except ClientError as exc:
-        if not _is_missing_bucket(exc):
-            raise InternalObjectStoreError("MinIO recusou o acesso ao bucket interno.") from exc
-        kwargs: dict[str, Any] = {"Bucket": bucket}
-        if settings.minio_internal_region != "us-east-1":
-            kwargs["CreateBucketConfiguration"] = {
-                "LocationConstraint": settings.minio_internal_region
-            }
-        client.create_bucket(**kwargs)
-        created = True
-    return {"bucket": bucket, "created": created, "endpoint": settings.minio_internal_endpoint}
+        client = _client()
+        created = False
+        try:
+            client.head_bucket(Bucket=bucket)
+        except ClientError as exc:
+            if not _is_missing_bucket(exc):
+                raise
+            kwargs: dict[str, Any] = {"Bucket": bucket}
+            if settings.minio_internal_region != "us-east-1":
+                kwargs["CreateBucketConfiguration"] = {
+                    "LocationConstraint": settings.minio_internal_region
+                }
+            client.create_bucket(**kwargs)
+            created = True
+        return {
+            "bucket": bucket,
+            "created": created,
+            "available": True,
+            "engine": "minio",
+            "degraded": False,
+            "minio_available": True,
+            "fallback_available": True,
+            "endpoint": settings.minio_internal_endpoint,
+        }
+    except Exception as exc:
+        directory, created = _ensure_fallback_bucket(bucket)
+        _fallback_probe()
+        return {
+            "bucket": bucket,
+            "created": created,
+            "available": True,
+            "engine": "local_fallback",
+            "degraded": True,
+            "minio_available": False,
+            "fallback_available": True,
+            "endpoint": f"file://{directory}",
+            "error": _minio_error(exc),
+        }
 
 
 def list_user_buckets(user_id: uuid.UUID) -> list[dict[str, Any]]:
-    client = _client()
     prefix = user_bucket_prefix(user_id)
-    payload = client.list_buckets()
-    buckets: list[dict[str, Any]] = []
-    for item in payload.get("Buckets") or []:
-        name = str(item.get("Name") or "")
-        if not name.startswith(prefix):
-            continue
-        buckets.append(
-            {
+    found: dict[str, dict[str, Any]] = {}
+    try:
+        payload = _client().list_buckets()
+        for item in payload.get("Buckets") or []:
+            name = str(item.get("Name") or "")
+            if not name.startswith(prefix):
+                continue
+            found[name] = {
                 "name": name,
                 "alias": bucket_alias_for_user(user_id, name),
                 "created_at": (
@@ -98,38 +187,185 @@ def list_user_buckets(user_id: uuid.UUID) -> list[dict[str, Any]]:
                     if item.get("CreationDate") is not None
                     else None
                 ),
+                "engine": "minio",
             }
+    except Exception:
+        pass
+
+    root = _fallback_root()
+    for directory in root.glob(f"{prefix}*"):
+        if not directory.is_dir():
+            continue
+        name = directory.name
+        found.setdefault(
+            name,
+            {
+                "name": name,
+                "alias": bucket_alias_for_user(user_id, name),
+                "created_at": None,
+                "engine": "local_fallback",
+            },
         )
-    return sorted(buckets, key=lambda item: item["name"])
+    return sorted(found.values(), key=lambda item: item["name"])
 
 
 def bucket_status(bucket: str) -> dict[str, Any]:
-    client = _client()
-    client.head_bucket(Bucket=bucket)
-    objects = client.list_objects_v2(Bucket=bucket, MaxKeys=1)
+    local_has_objects = _fallback_has_objects(bucket)
+    try:
+        client = _client()
+        client.head_bucket(Bucket=bucket)
+        objects = client.list_objects_v2(Bucket=bucket, MaxKeys=1)
+        remote_has_objects = bool(objects.get("KeyCount") or objects.get("Contents"))
+        return {
+            "bucket": bucket,
+            "available": True,
+            "engine": "minio",
+            "degraded": False,
+            "minio_available": True,
+            "fallback_available": True,
+            "has_objects": remote_has_objects or local_has_objects,
+            "remote_has_objects": remote_has_objects,
+            "local_fallback_has_objects": local_has_objects,
+        }
+    except Exception as exc:
+        _ensure_fallback_bucket(bucket)
+        _fallback_probe()
+        return {
+            "bucket": bucket,
+            "available": True,
+            "engine": "local_fallback",
+            "degraded": True,
+            "minio_available": False,
+            "fallback_available": True,
+            "has_objects": local_has_objects,
+            "remote_has_objects": None,
+            "local_fallback_has_objects": local_has_objects,
+            "error": _minio_error(exc),
+        }
+
+
+def delete_empty_bucket(bucket: str) -> dict[str, Any]:
+    directory = _bucket_dir(bucket)
+    if _fallback_has_objects(bucket):
+        raise InternalObjectStoreError(
+            "O bucket contém objetos no storage local. Remova os snapshots vinculados antes de excluir."
+        )
+
+    minio_deleted = False
+    minio_available = False
+    try:
+        client = _client()
+        client.head_bucket(Bucket=bucket)
+        objects = client.list_objects_v2(Bucket=bucket, MaxKeys=1)
+        if objects.get("KeyCount") or objects.get("Contents"):
+            raise InternalObjectStoreError(
+                "O bucket contém objetos no MinIO. Remova os snapshots vinculados antes de excluir."
+            )
+        client.delete_bucket(Bucket=bucket)
+        minio_deleted = True
+        minio_available = True
+    except InternalObjectStoreError:
+        raise
+    except ClientError as exc:
+        if not _is_missing_bucket(exc):
+            minio_available = False
+    except Exception:
+        minio_available = False
+
+    if directory.exists():
+        shutil.rmtree(directory)
     return {
-        "bucket": bucket,
-        "available": True,
-        "has_objects": bool(objects.get("KeyCount") or objects.get("Contents")),
+        "deleted": True,
+        "minio_deleted": minio_deleted,
+        "minio_available": minio_available,
     }
 
 
-def delete_empty_bucket(bucket: str) -> None:
-    client = _client()
-    objects = client.list_objects_v2(Bucket=bucket, MaxKeys=1)
-    if objects.get("KeyCount") or objects.get("Contents"):
+def upload_file(bucket: str, local_path: Path, remote_key: str) -> str:
+    ensure = ensure_bucket(bucket)
+    if ensure.get("engine") == "minio":
+        try:
+            client = _client()
+            client.upload_file(str(local_path), bucket, remote_key)
+            return f"s3://{bucket}/{remote_key}"
+        except Exception:
+            pass
+
+    destination = _object_path(bucket, remote_key)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(local_path, destination)
+    return f"{_LOCAL_SCHEME}{quote(bucket, safe='')}/{quote(remote_key, safe='/')}"
+
+
+def download_file(bucket: str, location: str, local_path: Path) -> Path:
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    if location.startswith(_LOCAL_SCHEME):
+        encoded = location.removeprefix(_LOCAL_SCHEME)
+        encoded_bucket, _, encoded_key = encoded.partition("/")
+        source_bucket = unquote(encoded_bucket)
+        source_key = unquote(encoded_key)
+        source = _object_path(source_bucket, source_key)
+        if not source.exists():
+            raise InternalObjectStoreError("Objeto do backup local não foi encontrado.")
+        shutil.copy2(source, local_path)
+        return local_path
+
+    prefix = f"s3://{bucket}/"
+    key = location[len(prefix) :] if location.startswith(prefix) else location
+    try:
+        _client().download_file(bucket, key, str(local_path))
+        return local_path
+    except Exception as exc:
+        source = _object_path(bucket, key)
+        if source.exists():
+            shutil.copy2(source, local_path)
+            return local_path
         raise InternalObjectStoreError(
-            "O bucket contém objetos. Remova os snapshots vinculados antes de excluir o bucket."
-        )
-    client.delete_bucket(Bucket=bucket)
+            "Snapshot não pôde ser lido do MinIO nem do storage local de contingência."
+        ) from exc
+
+
+def delete_object(bucket: str, location: str) -> None:
+    if location.startswith(_LOCAL_SCHEME):
+        encoded = location.removeprefix(_LOCAL_SCHEME)
+        encoded_bucket, _, encoded_key = encoded.partition("/")
+        target = _object_path(unquote(encoded_bucket), unquote(encoded_key))
+        target.unlink(missing_ok=True)
+        return
+
+    prefix = f"s3://{bucket}/"
+    key = location[len(prefix) :] if location.startswith(prefix) else location
+    try:
+        _client().delete_object(Bucket=bucket, Key=key)
+    except Exception:
+        target = _object_path(bucket, key)
+        target.unlink(missing_ok=True)
 
 
 def probe() -> dict[str, Any]:
     settings = get_settings()
-    client = _client()
-    client.list_buckets()
-    return {
-        "available": True,
-        "endpoint": settings.minio_internal_endpoint,
-        "access_key": settings.minio_internal_access_key,
-    }
+    fallback = _fallback_probe()
+    try:
+        _client().list_buckets()
+        return {
+            "available": True,
+            "engine": "minio",
+            "degraded": False,
+            "minio_available": True,
+            "fallback_available": True,
+            "endpoint": settings.minio_internal_endpoint,
+            "access_key": settings.minio_internal_access_key,
+            "fallback_path": fallback["path"],
+        }
+    except Exception as exc:
+        return {
+            "available": True,
+            "engine": "local_fallback",
+            "degraded": True,
+            "minio_available": False,
+            "fallback_available": True,
+            "endpoint": settings.minio_internal_endpoint,
+            "access_key": settings.minio_internal_access_key,
+            "fallback_path": fallback["path"],
+            "error": _minio_error(exc),
+        }
