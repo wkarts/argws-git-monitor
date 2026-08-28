@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import {
-  Archive, CheckCircle2, Cloud, CloudCog, Copy, DatabaseBackup, FolderPlus,
+  Archive, Cloud, CloudCog, Copy, DatabaseBackup, FolderPlus,
   FolderSync, HardDrive, Play, RefreshCw, RotateCcw, Server, ShieldCheck,
   Trash2, TriangleAlert
 } from 'lucide-vue-next'
