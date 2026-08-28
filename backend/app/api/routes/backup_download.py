@@ -26,6 +26,7 @@ _DOWNLOADABLE_STATUSES = {
 
 def _safe_segment(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+    cleaned = re.sub(r"\.{2,}", "-", cleaned)
     return cleaned.strip("-._") or "repository"
 
 
