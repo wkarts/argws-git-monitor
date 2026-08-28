@@ -19,6 +19,7 @@ from app.api.routes import (
     realtime,
     repositories,
     repository_controls,
+    storage_hub,
     system,
     webhooks,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "realtime",
     "repositories",
     "repository_controls",
+    "storage_hub",
     "system",
     "webhooks",
 ]

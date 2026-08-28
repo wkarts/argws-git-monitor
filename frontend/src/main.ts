@@ -6,6 +6,7 @@ import { realtime } from './services/realtime'
 import './assets/main.css'
 import './assets/operations.css'
 import './assets/sidebar-layout.css'
+import './assets/professional.css'
 
 createApp(App).use(pinia).use(router).mount('#app')
 
