@@ -19,6 +19,7 @@ from app.services.health import FAILURE_CONCLUSIONS
 from app.services.job_queue import create_job
 from app.services.notifications import create_notification
 from app.services.realtime import publish_event
+from app.services.webhook_materializer import materialize_operational_event
 from app.services.webhook_security import verify_github_signature
 from app.tasks.jobs import sync_repository_task
 from app.tasks.platform import backup_task
@@ -306,6 +307,17 @@ async def github_webhook(request: Request, db: DbSession):
                 "last_webhook_delivery": delivery_id,
             }
 
+            # Materializa Actions/PRs/Releases/Issues no mesmo transaction commit
+            # do webhook. Quando o WebSocket notificar a UI, /operations/* já lê
+            # o estado novo; o worker é apenas reconciliação e enriquecimento.
+            await materialize_operational_event(
+                db,
+                repository=repository,
+                event=event,
+                payload=payload,
+                observed_at=now,
+            )
+
             notification_data = await _create_critical_notification(
                 db,
                 user_id=user_id,
@@ -329,6 +341,7 @@ async def github_webhook(request: Request, db: DbSession):
                         "action": payload.get("action"),
                         "full_name": repository.full_name,
                         "summary": summary,
+                        "materialized": event in {"workflow_run", "pull_request", "release", "issues"},
                     },
                 )
             )
@@ -340,7 +353,7 @@ async def github_webhook(request: Request, db: DbSession):
                 kind=f"webhook.{event}",
                 label=f"Webhook {event} · {repository.full_name}",
                 progress_total=1,
-                message="Evento e alertas críticos aplicados; aguardando reconciliação detalhada.",
+                message="Estado visível aplicado imediatamente; reconciliação detalhada em segundo plano.",
             )
             sync_jobs.append((repository, job))
 
@@ -369,9 +382,9 @@ async def github_webhook(request: Request, db: DbSession):
                     )
                     backup_jobs.append((policy, repository, backup_job))
 
-    # Persiste primeiro entrega, deltas, notificações e jobs. Os eventos realtime
-    # são emitidos só depois do commit para que qualquer releitura da API já veja
-    # o mesmo estado que originou a mensagem do WebSocket.
+    # Persiste primeiro entrega, deltas, linhas operacionais, notificações e jobs.
+    # O realtime só sai depois do commit para eliminar a janela em que a interface
+    # recebia o evento e ainda relia dados antigos das tabelas operacionais.
     await db.commit()
 
     for user_id, repository, notification_data in notification_events:
@@ -410,7 +423,7 @@ async def github_webhook(request: Request, db: DbSession):
         except Exception as exc:
             job.status = SyncJobStatus.FAILED
             job.error = f"Falha ao enviar webhook ao worker: {exc}"[:4000]
-            job.message = "Evento aplicado, mas a reconciliação detalhada não iniciou."
+            job.message = "Evento aplicado em tempo real; apenas a reconciliação detalhada falhou."
             job.completed_at = datetime.now(UTC)
             failed += 1
 
