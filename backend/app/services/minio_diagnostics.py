@@ -24,6 +24,44 @@ def _safe_error(exc: Exception) -> dict[str, str | None]:
     }
 
 
+def _decode_mount_path(value: str) -> str:
+    return (
+        value.replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+    )
+
+
+def _nearest_mount(path: Path) -> str | None:
+    """Retorna o mountpoint Linux mais específico que contém ``path``.
+
+    Dentro de Docker, um bind/volume real em /data/backups aparece em
+    /proc/self/mountinfo. Se o único mountpoint aplicável for '/', o caminho
+    está apenas na camada gravável do container e não deve ser tratado como
+    backup persistente.
+    """
+
+    try:
+        target = path.resolve()
+        candidates: list[Path] = []
+        for raw in Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines():
+            parts = raw.split()
+            if len(parts) < 5:
+                continue
+            mount = Path(_decode_mount_path(parts[4])).resolve()
+            try:
+                target.relative_to(mount)
+            except ValueError:
+                continue
+            candidates.append(mount)
+        if not candidates:
+            return None
+        return str(max(candidates, key=lambda item: len(str(item))))
+    except Exception:
+        return None
+
+
 def _fallback_probe() -> dict[str, Any]:
     settings = get_settings()
     root = Path(settings.internal_object_fallback_root)
@@ -32,9 +70,33 @@ def _fallback_probe() -> dict[str, Any]:
         probe = root / ".argws-minio-diagnostics-write-test"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink(missing_ok=True)
-        return {"ok": True, "path": str(root)}
+        mount_point = _nearest_mount(root)
+        persistent_mount = bool(mount_point and mount_point != "/")
+        return {
+            "ok": True,
+            "path": str(root),
+            "persistent_mount": persistent_mount,
+            "mount_point": mount_point,
+        }
     except Exception as exc:
-        return {"ok": False, "path": str(root), "error": _safe_error(exc)}
+        return {
+            "ok": False,
+            "path": str(root),
+            "persistent_mount": False,
+            "mount_point": None,
+            "error": _safe_error(exc),
+        }
+
+
+def _with_fallback_warning(message: str, fallback: dict[str, Any]) -> str:
+    if fallback.get("ok") and not fallback.get("persistent_mount"):
+        return (
+            message
+            + " O fallback local está gravável, porém /data/backups não está montado "
+            "como volume persistente neste container. Atualize o compose da stack antes "
+            "de confiar nele para backups."
+        )
+    return message
 
 
 def diagnose_minio() -> dict[str, Any]:
@@ -42,7 +104,8 @@ def diagnose_minio() -> dict[str, Any]:
 
     Nunca retorna segredos. O resultado existe para diagnóstico operacional dentro
     da própria interface do Git Monitor e diferencia topologia ausente de erro de
-    credencial S3.
+    credencial S3. O fallback também informa se está realmente apoiado por um
+    mount persistente em vez da camada efêmera do container.
     """
 
     settings = get_settings()
@@ -50,6 +113,7 @@ def diagnose_minio() -> dict[str, Any]:
     parsed = urlparse(endpoint)
     host = parsed.hostname or "minio"
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    fallback = _fallback_probe()
 
     result: dict[str, Any] = {
         "ok": False,
@@ -60,7 +124,7 @@ def diagnose_minio() -> dict[str, Any]:
         "tcp": {"ok": False},
         "health": {"ok": False, "status": None},
         "s3": {"ok": False, "authenticated": False, "bucket_count": None},
-        "fallback": _fallback_probe(),
+        "fallback": fallback,
     }
 
     try:
@@ -69,9 +133,12 @@ def diagnose_minio() -> dict[str, Any]:
         result["dns"] = {"ok": True, "addresses": addresses}
     except Exception as exc:
         result["dns"]["error"] = _safe_error(exc)
-        result["message"] = (
-            f"O hostname interno '{host}' não foi resolvido. O container MinIO pode não "
-            "estar presente na mesma rede Docker da API."
+        result["message"] = _with_fallback_warning(
+            (
+                f"O hostname interno '{host}' não foi resolvido. O container MinIO pode não "
+                "estar presente na mesma rede Docker da API."
+            ),
+            fallback,
         )
         return result
 
@@ -81,9 +148,12 @@ def diagnose_minio() -> dict[str, Any]:
         result["tcp"] = {"ok": True}
     except Exception as exc:
         result["tcp"]["error"] = _safe_error(exc)
-        result["message"] = (
-            f"O DNS resolveu '{host}', mas não foi possível abrir TCP {host}:{port}. "
-            "Verifique se o serviço MinIO está iniciado e conectado à rede da aplicação."
+        result["message"] = _with_fallback_warning(
+            (
+                f"O DNS resolveu '{host}', mas não foi possível abrir TCP {host}:{port}. "
+                "Verifique se o serviço MinIO está iniciado e conectado à rede da aplicação."
+            ),
+            fallback,
         )
         return result
 
@@ -138,14 +208,15 @@ def diagnose_minio() -> dict[str, Any]:
             "error": safe,
         }
         if safe.get("code") in {"AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch"}:
-            result["message"] = (
+            base_message = (
                 "O MinIO está acessível pela rede, mas recusou a credencial S3 interna. "
                 "Ajuste a credencial do serviço e da API para o mesmo valor."
             )
         elif result["health"].get("ok"):
-            result["message"] = (
+            base_message = (
                 "O healthcheck do MinIO respondeu, mas a API S3 não completou a autenticação."
             )
         else:
-            result["message"] = "O endpoint foi alcançado, mas o protocolo S3 não respondeu corretamente."
+            base_message = "O endpoint foi alcançado, mas o protocolo S3 não respondeu corretamente."
+        result["message"] = _with_fallback_warning(base_message, fallback)
         return result
