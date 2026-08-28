@@ -44,12 +44,38 @@ function reportDiagnostic(file, diagnostic) {
   }
 }
 
+const forbiddenBrowserUi = [
+  {
+    pattern: /\bwindow\.(?:confirm|prompt|alert)\s*\(/,
+    message: 'não use confirm/prompt/alert nativo; use o DialogHost do ARGWS Git Monitor.'
+  },
+  {
+    pattern: /(^|[^.\w])(?:confirm|prompt|alert)\s*\(/m,
+    message: 'não use confirm/prompt/alert global; use o DialogHost do ARGWS Git Monitor.'
+  },
+  {
+    pattern: /new\s+Notification\s*\(/,
+    message: 'não use notificação do sistema operacional; use toast/dialog interno.'
+  },
+  {
+    pattern: /Notification\.requestPermission\s*\(/,
+    message: 'não solicite permissão de notificação do navegador; use a central interna.'
+  }
+]
+
 for (const file of walk(sourceRoot).filter((item) =>
   (item.endsWith('.ts') && !item.endsWith('.d.ts')) || item.endsWith('.vue')
 )) {
   const whole = fs.readFileSync(file, 'utf8')
   let source = whole
   let template = ''
+
+  for (const rule of forbiddenBrowserUi) {
+    if (rule.pattern.test(whole)) {
+      console.error(`${file}: ${rule.message}`)
+      failed = true
+    }
+  }
 
   if (file.endsWith('.vue')) {
     const scriptMatch = whole.match(/<script\s+setup\s+lang="ts">([\s\S]*?)<\/script>/)
