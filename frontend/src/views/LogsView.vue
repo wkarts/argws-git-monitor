@@ -6,9 +6,11 @@ import {
 } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { formatDateTime, formatRelative } from '../services/format'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { AuditLogItem, LogLine, LogPurgeResult, LogSource, LogTailResponse } from '../types/api'
 
+const dialogs = useDialogStore()
 const toasts = useToastStore()
 const sources = ref<LogSource[]>([])
 const selectedSource = ref('api')
@@ -138,11 +140,27 @@ async function downloadAudit(): Promise<void> {
 }
 
 async function purge(): Promise<void> {
-  const daysText = window.prompt('Remover somente arquivos de log rotacionados mais antigos que quantos dias?', '30')
+  const daysText = await dialogs.askText({
+    title: 'Aplicar retenção aos logs?',
+    message: 'Informe a idade mínima dos arquivos rotacionados que podem ser removidos. O arquivo de log atual será preservado.',
+    tone: 'warning',
+    confirmLabel: 'Continuar',
+    promptLabel: 'Arquivos mais antigos que quantos dias?',
+    promptPlaceholder: '30',
+    promptValue: '30',
+  })
   if (!daysText) return
   const days = Number(daysText)
   if (!Number.isFinite(days) || days < 1) { toasts.warning('Período inválido'); return }
-  const confirmation = window.prompt('A operação preserva o arquivo de log atual. Digite exatamente: PURGAR LOGS')
+  const confirmation = await dialogs.askText({
+    title: 'Confirmar limpeza de logs',
+    message: `Serão considerados somente arquivos rotacionados com mais de ${Math.floor(days)} dia(s).`,
+    tone: 'danger',
+    confirmLabel: 'Purgar logs antigos',
+    promptLabel: 'Confirmação obrigatória',
+    promptExpected: 'PURGAR LOGS',
+    promptPlaceholder: 'PURGAR LOGS',
+  })
   if (confirmation !== 'PURGAR LOGS') return
   try {
     const result = await api.post<LogPurgeResult>('/admin/logs/purge', {
