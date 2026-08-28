@@ -6,6 +6,7 @@ import {
 } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { formatDateTime } from '../services/format'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { AdminOverview, AdminPasswordResetResponse, AdminUser, MessageResponse } from '../types/api'
 
@@ -17,6 +18,7 @@ type EnrichedAdminUser = AdminUser & {
   avatar_url?: string | null
 }
 
+const dialogs = useDialogStore()
 const toasts = useToastStore()
 const loading = ref(true)
 const users = ref<EnrichedAdminUser[]>([])
@@ -109,6 +111,16 @@ async function saveEdit(): Promise<void> {
 }
 
 async function toggle(user: EnrichedAdminUser, field: 'is_active' | 'is_superuser'): Promise<void> {
+  const action = field === 'is_active'
+    ? (user.is_active ? 'desativar esta conta' : 'ativar esta conta')
+    : (user.is_superuser ? 'remover privilégios administrativos' : 'conceder privilégios administrativos')
+  const accepted = await dialogs.askConfirmation({
+    title: field === 'is_active' ? 'Alterar estado da conta?' : 'Alterar privilégios administrativos?',
+    message: `${user.name}: ${action}.`,
+    tone: user[field] ? 'warning' : 'info',
+    confirmLabel: 'Confirmar alteração',
+  })
+  if (!accepted) return
   try {
     await api.patch<EnrichedAdminUser>(`/admin/users/${user.id}`, { [field]: !user[field] })
     await load()
@@ -116,7 +128,13 @@ async function toggle(user: EnrichedAdminUser, field: 'is_active' | 'is_superuse
 }
 
 async function resetPassword(user: EnrichedAdminUser): Promise<void> {
-  if (!window.confirm(`Gerar uma nova senha temporária para ${user.name}? Todas as sessões serão revogadas.`)) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Gerar nova senha temporária?',
+    message: `${user.name} terá a credencial redefinida e todas as sessões existentes serão revogadas. A nova senha será exibida uma única vez.`,
+    tone: 'warning',
+    confirmLabel: 'Gerar nova senha',
+  })
+  if (!accepted) return
   try {
     const response = await api.post<AdminPasswordResetResponse>(`/admin/users/${user.id}/reset-password`)
     temporaryPassword.value = response.temporary_password
@@ -126,7 +144,13 @@ async function resetPassword(user: EnrichedAdminUser): Promise<void> {
 }
 
 async function revokeSessions(user: EnrichedAdminUser): Promise<void> {
-  if (!window.confirm(`Revogar todas as sessões de ${user.name}?`)) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Revogar todas as sessões?',
+    message: `${user.name} será desconectado de todos os dispositivos e precisará autenticar novamente.`,
+    tone: 'warning',
+    confirmLabel: 'Revogar sessões',
+  })
+  if (!accepted) return
   try {
     const response = await api.post<MessageResponse>(`/admin/users/${user.id}/revoke-sessions`)
     toasts.success('Sessões revogadas', response.message)
@@ -135,7 +159,13 @@ async function revokeSessions(user: EnrichedAdminUser): Promise<void> {
 }
 
 async function reset2fa(user: EnrichedAdminUser): Promise<void> {
-  if (!window.confirm(`Remover o 2FA de ${user.name}? O usuário precisará configurá-lo novamente.`)) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Redefinir 2FA?',
+    message: `O segundo fator de ${user.name} será removido. O usuário precisará configurar um novo autenticador antes de voltar a operar normalmente.`,
+    tone: 'danger',
+    confirmLabel: 'Redefinir 2FA',
+  })
+  if (!accepted) return
   try {
     const response = await api.post<MessageResponse>(`/admin/users/${user.id}/reset-2fa`)
     toasts.success('2FA redefinido', response.message)
@@ -144,7 +174,15 @@ async function reset2fa(user: EnrichedAdminUser): Promise<void> {
 }
 
 async function removeUser(user: EnrichedAdminUser): Promise<void> {
-  const typed = window.prompt(`Excluir definitivamente ${user.name}?\nDigite o e-mail da conta para confirmar:\n${user.email}`)
+  const typed = await dialogs.askText({
+    title: 'Excluir usuário definitivamente?',
+    message: `${user.name} será removido do ARGWS Git Monitor. Digite o e-mail da conta para confirmar a exclusão.`,
+    tone: 'danger',
+    confirmLabel: 'Excluir usuário',
+    promptLabel: 'Confirmação obrigatória',
+    promptExpected: user.email,
+    promptPlaceholder: user.email,
+  })
   if (typed !== user.email) return
   try {
     const response = await api.delete<MessageResponse>(`/admin/users/${user.id}`)
