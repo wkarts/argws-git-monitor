@@ -46,7 +46,5 @@ def test_backup_download_filename_is_safe_and_descriptive() -> None:
 
 def test_backup_download_filename_has_safe_fallback_without_repository() -> None:
     snapshot = _snapshot()
-
     filename = backup_download_filename(None, snapshot)
-
     assert filename == f"argws-backup-{snapshot.id}.tar.gz"
