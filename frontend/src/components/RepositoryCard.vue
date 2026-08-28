@@ -6,6 +6,7 @@ import HealthRing from './HealthRing.vue'
 import StatusBadge from './StatusBadge.vue'
 import { formatRelative, shortSha } from '../services/format'
 import { ApiError, api } from '../services/api'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { MessageResponse, Repository, SyncResponse } from '../types/api'
 
@@ -26,6 +27,7 @@ interface ActionsUpdateResponse {
 
 const props = defineProps<{ repository: Repository }>()
 const emit = defineEmits<{ changed: [] }>()
+const dialogs = useDialogStore()
 const toasts = useToastStore()
 const actionsBusy = ref(false)
 
@@ -52,11 +54,15 @@ async function toggleActions(): Promise<void> {
   try {
     const state = await api.get<ActionsState>(`/repository-controls/${props.repository.id}/actions`)
     const nextEnabled = !state.enabled
-    const action = nextEnabled ? 'ATIVAR' : 'DESATIVAR'
-    const extra = nextEnabled
-      ? ''
-      : '\n\nExecuções que ainda estiverem em fila ou andamento também serão canceladas quando possível.'
-    if (!window.confirm(`${action} GitHub Actions em ${props.repository.full_name}?${extra}`)) return
+    const confirmed = await dialogs.confirm({
+      title: nextEnabled ? 'Ativar GitHub Actions?' : 'Desativar GitHub Actions?',
+      message: nextEnabled
+        ? `Os workflows de ${props.repository.full_name} voltarão a aceitar execuções.`
+        : `Os workflows de ${props.repository.full_name} serão desativados. Execuções em fila ou andamento também terão cancelamento solicitado quando possível.`,
+      tone: nextEnabled ? 'info' : 'warning',
+      confirmLabel: nextEnabled ? 'Ativar Actions' : 'Desativar Actions',
+    })
+    if (!confirmed) return
     const result = await api.put<ActionsUpdateResponse>(`/repository-controls/${props.repository.id}/actions`, {
       enabled: nextEnabled,
       cancel_in_progress: true
@@ -75,7 +81,13 @@ async function toggleActions(): Promise<void> {
 
 async function togglePrivacy(): Promise<void> {
   const nextPrivate = !props.repository.private
-  if (!window.confirm(`Tornar ${props.repository.full_name} ${nextPrivate ? 'privado' : 'público'} no GitHub?`)) return
+  const confirmed = await dialogs.confirm({
+    title: nextPrivate ? 'Tornar repositório privado?' : 'Tornar repositório público?',
+    message: `${props.repository.full_name} será alterado no próprio GitHub.`,
+    tone: nextPrivate ? 'warning' : 'danger',
+    confirmLabel: nextPrivate ? 'Tornar privado' : 'Tornar público',
+  })
+  if (!confirmed) return
   try {
     await api.patch<Repository>(`/repositories/${props.repository.id}/github`, { private: nextPrivate })
     toasts.success('Visibilidade atualizada', `O repositório agora é ${nextPrivate ? 'privado' : 'público'}.`)
@@ -84,11 +96,13 @@ async function togglePrivacy(): Promise<void> {
 }
 
 async function removeMonitoring(): Promise<void> {
-  if (!window.confirm(
-    `Ignorar permanentemente ${props.repository.full_name} no Git Monitor?\n\n` +
-    'Ele continuará intacto no GitHub, mas desaparecerá do monitor e não voltará nas próximas sincronizações. '
-    + 'Você poderá removê-lo da lista negra depois.'
-  )) return
+  const confirmed = await dialogs.confirm({
+    title: 'Ignorar repositório no Git Monitor?',
+    message: `${props.repository.full_name} continuará intacto no GitHub, mas desaparecerá do monitor e não voltará nas próximas sincronizações. Você poderá reativá-lo depois pela lista de ignorados.`,
+    tone: 'warning',
+    confirmLabel: 'Ignorar repositório',
+  })
+  if (!confirmed) return
   try {
     const result = await api.post<MessageResponse>(`/repository-controls/${props.repository.id}/blacklist`)
     toasts.success('Repositório ignorado', result.message)
@@ -97,13 +111,16 @@ async function removeMonitoring(): Promise<void> {
 }
 
 async function deleteFromGithub(): Promise<void> {
-  const confirmation = window.prompt(
-    `EXCLUSÃO DEFINITIVA NO GITHUB.\n\nDigite exatamente ${props.repository.full_name} para confirmar:`
-  )
-  if (confirmation !== props.repository.full_name) {
-    if (confirmation !== null) toasts.warning('Confirmação diferente', 'O repositório não foi excluído.')
-    return
-  }
+  const confirmation = await dialogs.prompt({
+    title: 'Excluir definitivamente no GitHub?',
+    message: 'Esta ação remove o repositório remoto e não pode ser desfeita pelo Git Monitor. Backups existentes não substituem uma confirmação consciente desta exclusão.',
+    tone: 'danger',
+    confirmLabel: 'Excluir definitivamente',
+    promptLabel: 'Confirmação obrigatória',
+    promptExpected: props.repository.full_name,
+    promptPlaceholder: props.repository.full_name,
+  })
+  if (confirmation === null) return
   try {
     const result = await api.post<MessageResponse>(`/repositories/${props.repository.id}/delete-github`, { confirmation })
     toasts.success('Repositório excluído', result.message)
