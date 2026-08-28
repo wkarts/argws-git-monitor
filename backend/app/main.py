@@ -15,6 +15,7 @@ from app.api.routes import (
     admin,
     admin_permissions,
     auth,
+    backup_download,
     backup_lifecycle,
     compliance_local,
     dashboard,
@@ -147,6 +148,7 @@ app.include_router(repository_controls.router, prefix=settings.api_v1_prefix)
 app.include_router(operations.router, prefix=settings.api_v1_prefix)
 app.include_router(platform.router, prefix=settings.api_v1_prefix)
 app.include_router(storage_hub.router, prefix=settings.api_v1_prefix)
+app.include_router(backup_download.router, prefix=settings.api_v1_prefix)
 app.include_router(backup_lifecycle.router, prefix=settings.api_v1_prefix)
 app.include_router(realtime.router, prefix=settings.api_v1_prefix)
 app.websocket(
