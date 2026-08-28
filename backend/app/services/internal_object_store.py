@@ -14,7 +14,7 @@ class InternalObjectStoreError(RuntimeError):
     pass
 
 
-_BUCKET_ALIAS = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$")
+_BUCKET_ALIAS = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 
 
 def user_bucket_prefix(user_id: uuid.UUID) -> str:
@@ -24,7 +24,7 @@ def user_bucket_prefix(user_id: uuid.UUID) -> str:
 def normalize_bucket_alias(value: str) -> str:
     alias = value.strip().lower().replace("_", "-").replace(" ", "-")
     alias = re.sub(r"-+", "-", alias).strip("-")
-    if not _BUCKET_ALIAS.fullmatch(alias):
+    if not 3 <= len(alias) <= 32 or not _BUCKET_ALIAS.fullmatch(alias):
         raise InternalObjectStoreError(
             "Nome do bucket deve ter 3 a 32 caracteres, usando apenas letras minúsculas, números e hífen."
         )
