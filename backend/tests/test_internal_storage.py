@@ -5,18 +5,22 @@ from pathlib import Path
 
 import pytest
 
+import app.services.internal_object_store as internal_object_store
 import app.services.internal_storage as internal_storage
 from app.models.platform import StorageProvider
 from app.services.internal_object_store import (
     InternalObjectStoreError,
     bucket_alias_for_user,
     bucket_name_for_user,
+    bucket_status,
+    ensure_bucket,
     normalize_bucket_alias,
+    probe,
 )
-from app.services.storage_providers import LocalStorageAdapter
+from app.services.storage_providers import LocalStorageAdapter, ManagedInternalStorageAdapter
 
 
-def test_managed_internal_storage_uses_real_minio_and_isolated_local_path(
+def test_managed_internal_storage_prefers_minio_and_isolates_local_path(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -101,3 +105,44 @@ def test_internal_local_staging_can_write_copy_read_and_delete(tmp_path: Path) -
 
     adapter.delete(location)
     assert stored.exists() is False
+
+
+def test_managed_internal_bucket_uses_local_fallback_when_minio_is_offline(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fallback_root = tmp_path / "object-store"
+    monkeypatch.setattr(internal_object_store, "_fallback_root", lambda: fallback_root)
+
+    def offline_client():
+        raise OSError("minio offline")
+
+    monkeypatch.setattr(internal_object_store, "_client", offline_client)
+    bucket = "argws-111111112222-backups"
+
+    ensured = ensure_bucket(bucket)
+    state = bucket_status(bucket)
+    runtime = probe()
+
+    assert ensured["available"] is True
+    assert ensured["engine"] == "local_fallback"
+    assert state["available"] is True
+    assert state["minio_available"] is False
+    assert runtime["available"] is True
+    assert runtime["engine"] == "local_fallback"
+    assert runtime["fallback_available"] is True
+
+    adapter = ManagedInternalStorageAdapter({"bucket": bucket, "prefix": ""})
+    assert adapter.test()["degraded"] is True
+
+    source = tmp_path / "snapshot.tar.gz"
+    source.write_bytes(b"ARGWS-resilient-backup")
+    location = adapter.upload(source, "wkarts/project/snapshot.tar.gz")
+    assert location.startswith("argws-local-bucket://")
+
+    restored = tmp_path / "restored.tar.gz"
+    adapter.download(location, restored)
+    assert restored.read_bytes() == source.read_bytes()
+
+    adapter.delete(location)
+    assert not any(item.is_file() for item in (fallback_root / bucket).rglob("*"))
