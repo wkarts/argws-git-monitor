@@ -106,5 +106,16 @@ export const useDialogStore = defineStore('dialog', () => {
     await open({ ...options, showCancel: false })
   }
 
-  return { current, open, askConfirmation, askText, showMessage, accept, cancel }
+  return {
+    current,
+    open,
+    askConfirmation,
+    askText,
+    showMessage,
+    confirm: askConfirmation,
+    prompt: askText,
+    message: showMessage,
+    accept,
+    cancel,
+  }
 })
