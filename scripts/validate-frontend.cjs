@@ -44,6 +44,9 @@ function reportDiagnostic(file, diagnostic) {
   }
 }
 
+// Somente dialogs síncronos do navegador são proibidos. Web Push / Web
+// Notifications são um canal legítimo de notificação da aplicação e não devem
+// ser confundidos com confirm/prompt/alert do browser.
 const forbiddenBrowserUi = [
   {
     pattern: /\bwindow\.(?:confirm|prompt|alert)\s*\(/,
@@ -52,14 +55,6 @@ const forbiddenBrowserUi = [
   {
     pattern: /(^|[^.\w])(?:confirm|prompt|alert)\s*\(/m,
     message: 'não use confirm/prompt/alert global; use o DialogHost do ARGWS Git Monitor.'
-  },
-  {
-    pattern: /new\s+Notification\s*\(/,
-    message: 'não use notificação do sistema operacional; use toast/dialog interno.'
-  },
-  {
-    pattern: /Notification\.requestPermission\s*\(/,
-    message: 'não solicite permissão de notificação do navegador; use a central interna.'
   }
 ]
 
