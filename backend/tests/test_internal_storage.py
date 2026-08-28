@@ -5,6 +5,7 @@ from pathlib import Path
 
 import app.services.internal_storage as internal_storage
 from app.models.platform import StorageProvider
+from app.services.storage_providers import LocalStorageAdapter
 
 
 def test_managed_internal_storage_uses_isolated_paths(tmp_path: Path, monkeypatch) -> None:
@@ -50,3 +51,24 @@ def test_managed_provider_detection() -> None:
 
     assert internal_storage.is_managed_internal_provider(provider) is True
     assert internal_storage.is_managed_internal_provider(external) is False
+
+
+def test_internal_filesystem_storage_can_write_copy_read_and_delete(tmp_path: Path) -> None:
+    root = tmp_path / "object-store" / "user" / "argws-backups"
+    adapter = LocalStorageAdapter({"base_path": str(root)})
+    adapter.test()
+
+    source = tmp_path / "snapshot.tar.gz"
+    source.write_bytes(b"ARGWS-backup-payload")
+    location = adapter.upload(source, "repositories/wkarts/project/snapshot.tar.gz")
+
+    stored = Path(location.removeprefix("file://"))
+    assert stored.is_file()
+    assert stored.read_bytes() == source.read_bytes()
+
+    downloaded = tmp_path / "downloaded.tar.gz"
+    adapter.download(location, downloaded)
+    assert downloaded.read_bytes() == source.read_bytes()
+
+    adapter.delete(location)
+    assert stored.exists() is False
