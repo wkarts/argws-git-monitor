@@ -4,9 +4,9 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 mkdir -p \
-  data-postgres data-redis data-rabbitmq \
+  data-postgres data-redis data-rabbitmq data-minio data-backups \
   data-logs/api data-logs/worker data-logs/beat data-logs/migrate \
-  data-logs/web data-logs/postgres data-logs/redis data-logs/rabbitmq
+  data-logs/web data-logs/postgres data-logs/redis data-logs/rabbitmq data-logs/minio
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker não encontrado." >&2
@@ -22,6 +22,17 @@ docker compose version >/dev/null 2>&1 || {
   exit 1
 }
 
+# Compatibilidade com instalações anteriores à inclusão do MinIO interno.
+# Apenas atualizar as imagens :latest não cria serviços novos no manifesto antigo.
+if ! grep -Eq '^[[:space:]]+minio:' compose.yaml; then
+  echo "compose.yaml incompatível: serviço minio ausente. Atualize o manifesto da stack antes do deploy." >&2
+  exit 1
+fi
+if ! grep -Fq './data-backups:/data/backups' compose.yaml; then
+  echo "compose.yaml incompatível: volume compartilhado ./data-backups:/data/backups ausente." >&2
+  exit 1
+fi
+
 compose=(docker compose --env-file .env -f compose.yaml)
 "${compose[@]}" config -q
 "${compose[@]}" pull
@@ -36,13 +47,19 @@ for _ in $(seq 1 90); do
     echo "Stack pronta em http://127.0.0.1:${PORT} para o reverse proxy do CloudPanel."
     echo "Imagens GHCR: :latest"
     echo "Versão: obtida do próprio aplicativo"
-    echo "Dados em $ROOT/data-postgres, $ROOT/data-redis, $ROOT/data-rabbitmq e $ROOT/data-logs"
+    echo "Persistência:"
+    echo "- $ROOT/data-postgres"
+    echo "- $ROOT/data-redis"
+    echo "- $ROOT/data-rabbitmq"
+    echo "- $ROOT/data-minio"
+    echo "- $ROOT/data-backups"
+    echo "- $ROOT/data-logs"
     exit 0
   fi
   sleep 2
 done
 
 "${compose[@]}" ps
-"${compose[@]}" logs --tail=150 migrate api web >&2 || true
+"${compose[@]}" logs --tail=150 migrate api worker minio web >&2 || true
 echo "A stack não ficou pronta dentro do tempo esperado." >&2
 exit 1

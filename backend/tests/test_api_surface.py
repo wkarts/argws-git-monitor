@@ -44,6 +44,7 @@ EXPECTED_OPERATIONAL_PATHS = {
     "/api/v1/storage-hub/internal-buckets/{provider_id}/test",
     "/api/v1/storage-hub/backups/run",
     "/api/v1/storage-hub/backups/{snapshot_id}/copy",
+    "/api/v1/storage-hub/backups/{snapshot_id}/download",
     "/api/v1/operations/status",
     "/api/v1/operations/actions",
     "/api/v1/operations/pull-requests",
@@ -112,6 +113,7 @@ def test_openapi_exposes_v060_realtime_and_control_operations() -> None:
     assert "post" in paths["/api/v1/storage-hub/internal-buckets/{provider_id}/test"]
     assert "post" in paths["/api/v1/storage-hub/backups/run"]
     assert "post" in paths["/api/v1/storage-hub/backups/{snapshot_id}/copy"]
+    assert "get" in paths["/api/v1/storage-hub/backups/{snapshot_id}/download"]
 
 
 def test_websocket_route_is_registered_outside_openapi() -> None:

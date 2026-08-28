@@ -42,7 +42,10 @@ argws-git-monitor/
 ├── .env
 ├── data-postgres/
 ├── data-redis/
-└── data-rabbitmq/
+├── data-rabbitmq/
+├── data-minio/
+├── data-backups/
+└── data-logs/
 ```
 
 O host usa somente caminhos relativos:
@@ -51,9 +54,11 @@ O host usa somente caminhos relativos:
 - ./data-postgres:/var/lib/postgresql/data
 - ./data-redis:/data
 - ./data-rabbitmq:/var/lib/rabbitmq
+- ./data-minio:/data
+- ./data-backups:/data/backups
 ```
 
-O CloudPanel não armazena os dados da aplicação e nenhum Compose aponta para um diretório absoluto do Linux.
+`./data-backups:/data/backups` é montado simultaneamente na API e no worker. Isso é obrigatório para que o fallback local de backup seja persistente e compartilhado. O CloudPanel não armazena os dados da aplicação e nenhum Compose aponta para um diretório absoluto do Linux.
 
 ## 1. Preparar a stack do Dockge
 
@@ -73,11 +78,14 @@ bash generate-env.sh \
   --port 8080
 ```
 
-O gerador cria `./data-postgres`, `./data-redis` e `./data-rabbitmq` e fixa:
+O gerador cria `./data-postgres`, `./data-redis`, `./data-rabbitmq`, `./data-minio`, `./data-backups` e `./data-logs`, e fixa:
 
 ```dotenv
 APP_BIND_ADDRESS=127.0.0.1
+MINIO_INTERNAL_ACCESS_KEY=argws-internal
 ```
+
+O segredo S3 interno usa `APP_SECRET_KEY` por padrão. `GITHUB_WEBHOOK_SECRET` deve ser um segredo HMAC aleatório; não use GitHub PAT nessa variável.
 
 ## 3. Subir a stack
 
@@ -93,7 +101,7 @@ Ou pelo Dockge:
 4. execute **Pull**;
 5. execute **Update/Deploy** para recriar os containers;
 6. confirme `migrate` concluído;
-7. valide os serviços saudáveis.
+7. valide os serviços saudáveis, inclusive `minio`.
 
 ## 4. Criar o site no CloudPanel
 
@@ -118,6 +126,8 @@ curl -fsS http://127.0.0.1:8080/api/v1/health/ready
 curl -fsS https://git.seu-dominio.com.br/api/v1/health/ready
 ```
 
+No Git Monitor, abra **Backup & Recovery → Testar MinIO/S3**. O diagnóstico deve indicar DNS, TCP, health HTTP e autenticação S3 individualmente.
+
 ## 7. Atualização
 
 ```bash
@@ -127,6 +137,32 @@ docker compose --env-file .env -f compose.yaml up -d --no-build --force-recreate
 ```
 
 O `deploy.sh` já executa esse fluxo e sempre utiliza `:latest`.
+
+### Instalações anteriores ao MinIO interno
+
+Somente executar `docker compose pull` **não adiciona serviços novos ao manifesto existente**. Se o diagnóstico informar que o hostname `minio` não resolve, confira o `compose.yaml` atual. Uma stack compatível precisa conter:
+
+- serviço `minio` conectado à rede `gitmonitor`;
+- `MINIO_INTERNAL_ENDPOINT=http://minio:9000` no ambiente da API/worker;
+- `./data-minio:/data` no MinIO;
+- `./data-backups:/data/backups` no template compartilhado por API/worker;
+- inicialização de `data-minio` e `data-backups`.
+
+Para atualizar uma stack antiga sem tocar nos bancos:
+
+```bash
+cd /caminho/das/stacks/argws-git-monitor
+cp compose.yaml compose.yaml.pre-minio.bak
+cp /caminho/do/pacote/deploy/cloudpanel/dockge/compose.yaml ./compose.yaml
+mkdir -p data-minio data-backups
+# preserve o .env atual; adicione apenas a chave abaixo se ainda não existir
+grep -q '^MINIO_INTERNAL_ACCESS_KEY=' .env || printf '\nMINIO_INTERNAL_ACCESS_KEY=argws-internal\n' >> .env
+docker compose --env-file .env -f compose.yaml config -q
+docker compose --env-file .env -f compose.yaml pull
+docker compose --env-file .env -f compose.yaml up -d --no-build --force-recreate --remove-orphans
+```
+
+Esse procedimento preserva `data-postgres`, `data-redis`, `data-rabbitmq`, `.env` e os demais dados existentes. Não regenere o `.env` de produção para fazer esse upgrade.
 
 ## 8. Migração de volumes nomeados antigos
 
@@ -145,7 +181,7 @@ Os volumes antigos permanecem disponíveis para rollback.
 ## Segurança
 
 - mantenha `APP_BIND_ADDRESS=127.0.0.1`;
-- não publique PostgreSQL, Redis ou AMQP;
+- não publique PostgreSQL, Redis, AMQP ou MinIO diretamente na internet;
 - mantenha o RabbitMQ Management em `127.0.0.1`;
 - não versione `.env` nem as pastas `data-*`;
 - mantenha TLS ativo no CloudPanel;
