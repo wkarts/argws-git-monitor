@@ -7,8 +7,8 @@ from app.models.github import Repository
 from app.models.platform import BackupSnapshot
 
 
-def test_backup_download_filename_is_safe_and_descriptive() -> None:
-    snapshot = BackupSnapshot(
+def _snapshot() -> BackupSnapshot:
+    return BackupSnapshot(
         id=uuid.UUID("11111111-2222-3333-4444-555555555555"),
         user_id=uuid.uuid4(),
         repository_id=uuid.uuid4(),
@@ -18,6 +18,10 @@ def test_backup_download_filename_is_safe_and_descriptive() -> None:
         permanent=False,
         manifest={},
     )
+
+
+def test_backup_download_filename_is_safe_and_descriptive() -> None:
+    snapshot = _snapshot()
     repository = Repository(
         id=uuid.uuid4(),
         connection_id=uuid.uuid4(),
@@ -38,3 +42,11 @@ def test_backup_download_filename_is_safe_and_descriptive() -> None:
     assert "/" not in filename
     assert "ARGWS-Git-Monitor" in filename
     assert str(snapshot.id) in filename
+
+
+def test_backup_download_filename_has_safe_fallback_without_repository() -> None:
+    snapshot = _snapshot()
+
+    filename = backup_download_filename(None, snapshot)
+
+    assert filename == f"argws-backup-{snapshot.id}.tar.gz"
