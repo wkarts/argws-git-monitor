@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "argws-git-monitor-api"
-version = "0.7.2"
+version = "0.7.3"
 description = "API e workers do ARGWS Git Monitor"
 readme = "README.md"
 requires-python = ">=3.13,<3.15"
