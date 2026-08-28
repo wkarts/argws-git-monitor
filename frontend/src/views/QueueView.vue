@@ -6,9 +6,11 @@ import {
 } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { formatDateTime } from '../services/format'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { MessageResponse, QueueOverview, SyncJob, SyncJobStatus } from '../types/api'
 
+const dialogs = useDialogStore()
 const toasts = useToastStore()
 const jobs = ref<SyncJob[]>([])
 const overview = ref<QueueOverview>({
@@ -54,7 +56,13 @@ async function load(silent = false): Promise<void> {
 }
 
 async function cancel(job: SyncJob): Promise<void> {
-  if (!window.confirm(`Cancelar “${job.label}”?`)) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Cancelar processamento?',
+    message: `“${job.label}” receberá uma solicitação de cancelamento. Dados já persistidos não são revertidos automaticamente.`,
+    tone: 'warning',
+    confirmLabel: 'Cancelar job',
+  })
+  if (!accepted) return
   try {
     const response = await api.post<MessageResponse>(`/jobs/${job.id}/cancel`)
     toasts.success('Cancelamento solicitado', response.message)
@@ -75,7 +83,13 @@ async function retry(job: SyncJob): Promise<void> {
 }
 
 async function reconcile(): Promise<void> {
-  if (!window.confirm('Marcar como falhos os jobs pendentes há mais de 15 minutos? Isso não apaga dados do GitHub.')) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Reconciliar jobs travados?',
+    message: 'Jobs ainda pendentes há mais de 15 minutos serão marcados como falhos para liberar o estado operacional. Esta ação não apaga dados do GitHub.',
+    tone: 'warning',
+    confirmLabel: 'Reconciliar fila',
+  })
+  if (!accepted) return
   reconciling.value = true
   try {
     const response = await api.post<MessageResponse>('/jobs/reconcile?older_than_minutes=15')
