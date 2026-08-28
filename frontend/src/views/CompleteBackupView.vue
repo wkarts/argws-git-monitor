@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Archive, AlertTriangle, CheckCircle2, DatabaseBackup, Play, RefreshCw, ShieldCheck, Trash2 } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { PaginatedResponse, Repository } from '../types/api'
 
@@ -10,6 +11,7 @@ interface StorageProvider { id:string; name:string; kind:string; enabled:boolean
 interface LifecycleResponse { job_id:string; task_id:string; repository:string; provider:string; delete_after_backup:boolean; status:string; safety:string }
 
 const route=useRoute()
+const dialogs=useDialogStore()
 const toasts=useToastStore()
 const loading=ref(true)
 const busy=ref(false)
@@ -50,9 +52,15 @@ function toggleDelete():void{
 
 async function execute():Promise<void>{
   if(!canRun.value||busy.value)return
-  if(form.delete_after_backup&&!confirm(
-    `O Git Monitor fará o backup completo, validará os checksums e SOMENTE DEPOIS tentará excluir ${selectedRepository.value?.full_name} do GitHub.\n\nSe houver qualquer warning no backup, a exclusão será bloqueada. Continuar?`
-  ))return
+  if(form.delete_after_backup){
+    const confirmed=await dialogs.confirm({
+      title:'Backup completo e exclusão definitiva?',
+      message:`O Git Monitor fará o backup completo de ${selectedRepository.value?.full_name}, validará os checksums e somente depois tentará excluir o repositório do GitHub. Qualquer warning bloqueia a exclusão.`,
+      tone:'danger',
+      confirmLabel:'Backup e excluir',
+    })
+    if(!confirmed)return
+  }
   busy.value=true
   try{
     const result=await api.post<LifecycleResponse>(`/backup-lifecycle/${form.repository_id}/complete`,{
