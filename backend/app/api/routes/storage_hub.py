@@ -27,8 +27,9 @@ from app.services.internal_storage import (
     is_system_internal_provider,
 )
 from app.services.job_queue import create_job
+from app.services.minio_diagnostics import diagnose_minio
 from app.services.storage_providers import build_storage_adapter
-from app.services.worker_status import require_worker
+from app.services.worker_status import require_worker, status_payload
 from app.tasks.platform import backup_task
 from app.tasks.storage_hub import copy_snapshot_task
 
@@ -174,13 +175,54 @@ async def _providers_with_state(
     return result
 
 
+async def _resolve_backup_target(
+    payload: ManagedBackupRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> tuple[Repository, StorageProvider, dict[str, Any], Any]:
+    repository = await _owned_repository(
+        db, repository_id=payload.repository_id, user_id=current_user.id
+    )
+    await ensure_internal_storage_providers(db, user_id=current_user.id)
+    provider = (
+        await db.get(StorageProvider, payload.provider_id)
+        if payload.provider_id
+        else await default_backup_provider(db, user_id=current_user.id)
+    )
+    if not provider or provider.user_id != current_user.id or not provider.enabled:
+        raise HTTPException(status_code=404, detail="Provider de backup não encontrado ou desativado.")
+
+    state: dict[str, Any] = {}
+    if (provider.config or {}).get("storage_class") == "internal_s3":
+        state = await _ensure_internal_bucket(provider)
+        if state.get("available") is False:
+            raise HTTPException(status_code=503, detail=str(state.get("error")))
+    try:
+        adapter_test = await asyncio.to_thread(build_storage_adapter(provider).test)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"O destino {provider.name} não passou no teste de gravação/conexão. "
+                "Corrija o provider antes de executar o backup."
+            ),
+        ) from exc
+
+    try:
+        worker = await require_worker()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker indisponível. O backup não foi iniciado.",
+        ) from exc
+    return repository, provider, {**state, **adapter_test}, worker
+
+
 @router.get("/overview")
 async def storage_overview(
     current_user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
-    # Os providers são garantidos mesmo quando o MinIO ainda não faz parte da
-    # topologia instalada. O adapter interno usa /data/backups como contingência.
     await ensure_internal_storage_providers(db, user_id=current_user.id)
     await db.commit()
 
@@ -296,6 +338,34 @@ async def storage_overview(
     }
 
 
+@router.post("/internal-storage/test")
+async def test_internal_storage(
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    _require(current_user, "backup.providers.manage")
+    result = await asyncio.to_thread(diagnose_minio)
+    try:
+        worker = await require_worker()
+        result["worker"] = status_payload(worker)
+    except RuntimeError as exc:
+        result["worker"] = {
+            "online": False,
+            "workers": [],
+            "worker_count": 0,
+            "error": str(exc)[:500],
+        }
+    logger.info(
+        "Diagnóstico storage interno: minio_ok=%s dns=%s tcp=%s s3=%s fallback=%s worker=%s",
+        result.get("ok"),
+        (result.get("dns") or {}).get("ok"),
+        (result.get("tcp") or {}).get("ok"),
+        (result.get("s3") or {}).get("ok"),
+        (result.get("fallback") or {}).get("ok"),
+        (result.get("worker") or {}).get("online"),
+    )
+    return result
+
+
 @router.post("/internal-buckets", status_code=status.HTTP_201_CREATED)
 async def create_internal_bucket(
     payload: InternalBucketCreate,
@@ -401,6 +471,33 @@ async def remove_internal_bucket(
     return Response(status_code=204)
 
 
+@router.post("/backups/preflight")
+async def preflight_managed_backup(
+    payload: ManagedBackupRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    _require(current_user, "backup.execute")
+    repository, provider, storage, worker = await _resolve_backup_target(
+        payload, current_user, db
+    )
+    await db.commit()
+    logger.info(
+        "Preflight backup aprovado: repository=%s provider=%s engine=%s worker_count=%s",
+        repository.full_name,
+        provider.id,
+        storage.get("engine") or provider.kind,
+        len(worker.workers),
+    )
+    return {
+        "ok": True,
+        "repository": {"id": str(repository.id), "full_name": repository.full_name},
+        "provider": _provider_payload(provider, storage_state=storage),
+        "storage": storage,
+        "worker": status_payload(worker),
+    }
+
+
 @router.post("/backups/run")
 async def run_managed_backup(
     payload: ManagedBackupRequest,
@@ -408,40 +505,9 @@ async def run_managed_backup(
     db: DbSession,
 ) -> dict[str, Any]:
     _require(current_user, "backup.execute")
-    repository = await _owned_repository(
-        db, repository_id=payload.repository_id, user_id=current_user.id
+    repository, provider, storage, worker = await _resolve_backup_target(
+        payload, current_user, db
     )
-    await ensure_internal_storage_providers(db, user_id=current_user.id)
-    provider = (
-        await db.get(StorageProvider, payload.provider_id)
-        if payload.provider_id
-        else await default_backup_provider(db, user_id=current_user.id)
-    )
-    if not provider or provider.user_id != current_user.id or not provider.enabled:
-        raise HTTPException(status_code=404, detail="Provider de backup não encontrado ou desativado.")
-
-    if (provider.config or {}).get("storage_class") == "internal_s3":
-        state = await _ensure_internal_bucket(provider)
-        if state.get("available") is False:
-            raise HTTPException(status_code=503, detail=str(state.get("error")))
-    try:
-        await asyncio.to_thread(build_storage_adapter(provider).test)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"O destino {provider.name} não passou no teste de gravação/conexão. "
-                "Corrija o provider antes de executar o backup."
-            ),
-        ) from exc
-
-    try:
-        await require_worker()
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Worker indisponível. O backup não foi iniciado.",
-        ) from exc
 
     job = await create_job(
         db,
@@ -467,16 +533,28 @@ async def run_managed_backup(
             },
         )
     except Exception as exc:
+        logger.exception("Falha ao publicar job de backup: job=%s", job.id)
         raise HTTPException(
             status_code=503,
             detail="Não foi possível enviar o backup ao worker.",
         ) from exc
     job.celery_task_id = task.id
     await db.commit()
+    logger.info(
+        "Backup enfileirado: job=%s task=%s repository=%s provider=%s engine=%s workers=%s",
+        job.id,
+        task.id,
+        repository.full_name,
+        provider.id,
+        storage.get("engine") or provider.kind,
+        len(worker.workers),
+    )
     return {
         "job_id": str(job.id),
         "task_id": task.id,
-        "provider": _provider_payload(provider),
+        "provider": _provider_payload(provider, storage_state=storage),
+        "repository": {"id": str(repository.id), "full_name": repository.full_name},
+        "worker": status_payload(worker),
         "status": "queued",
     }
 
