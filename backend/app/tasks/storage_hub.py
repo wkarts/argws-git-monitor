@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.database import dispose_engine, session_scope
+from app.models.github import Repository
 from app.models.platform import BackupSnapshot, BackupStatus, StorageProvider
 from app.services.backup_service import sha256_file
 from app.services.job_queue import (
@@ -47,8 +48,11 @@ def copy_snapshot_task(self, job_id: str, params: dict[str, Any]):
             if not target_provider or target_provider.user_id != user_id or not target_provider.enabled:
                 raise RuntimeError("Provider de destino não encontrado ou desativado.")
             source_provider = await session.get(StorageProvider, source.provider_id)
+            repository = await session.get(Repository, source.repository_id)
             if not source_provider or source_provider.user_id != user_id:
                 raise RuntimeError("Provider de origem indisponível.")
+            if not repository:
+                raise RuntimeError("Repositório do snapshot não foi encontrado.")
             if source_provider.id == target_provider.id:
                 raise RuntimeError("Origem e destino são o mesmo provider.")
 
@@ -61,7 +65,6 @@ def copy_snapshot_task(self, job_id: str, params: dict[str, Any]):
                     raise RuntimeError("Checksum do snapshot de origem não confere; cópia abortada.")
 
                 await update_job_progress(job_id, current=3, total=4, message="Enviando snapshot ao provider de destino.")
-                repository = source.repository
                 remote_key = (
                     f"replicas/{repository.owner}/{repository.name}/"
                     f"{datetime.now(UTC).strftime('%Y/%m/%d')}/"
