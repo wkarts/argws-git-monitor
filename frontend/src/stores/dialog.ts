@@ -92,19 +92,19 @@ export const useDialogStore = defineStore('dialog', () => {
     settle(null)
   }
 
-  async function confirm(options: DialogOptions): Promise<boolean> {
+  async function askConfirmation(options: DialogOptions): Promise<boolean> {
     const result = await open({ ...options, showCancel: true })
     return result === true
   }
 
-  async function prompt(options: DialogOptions): Promise<string | null> {
+  async function askText(options: DialogOptions): Promise<string | null> {
     const result = await open({ ...options, showCancel: true })
     return typeof result === 'string' ? result : null
   }
 
-  async function message(options: DialogOptions): Promise<void> {
+  async function showMessage(options: DialogOptions): Promise<void> {
     await open({ ...options, showCancel: false })
   }
 
-  return { current, open, confirm, prompt, message, accept, cancel }
+  return { current, open, askConfirmation, askText, showMessage, accept, cancel }
 })
