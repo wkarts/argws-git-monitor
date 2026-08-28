@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { AlertTriangle, CheckCircle2, RefreshCw, ServerCrash } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { formatRelative } from '../services/format'
+import { REALTIME_EVENT, type RealtimeEvent } from '../services/realtime'
 import { useToastStore } from '../stores/toast'
 import type { GitHubConnection, OperationModuleStatus, OperationsStatus, SyncResponse } from '../types/api'
 
@@ -12,6 +13,7 @@ const toasts = useToastStore()
 const status = ref<OperationsStatus | null>(null)
 const syncing = ref(false)
 let timer: number | undefined
+let realtimeTimer: number | undefined
 
 const module = computed<OperationModuleStatus | null>(() =>
   status.value?.modules.find((item) => item.key === props.moduleKey) || null
@@ -28,6 +30,13 @@ const state = computed(() => {
   return 'ok'
 })
 
+const realtimeType = computed(() => ({
+  actions: 'github.workflow_run',
+  pull_requests: 'github.pull_request',
+  issues: 'github.issues',
+  releases: 'github.release'
+})[props.moduleKey])
+
 async function load(silent = false): Promise<void> {
   try { status.value = await api.get<OperationsStatus>('/operations/status') }
   catch (error) { if (!silent) toasts.error('Falha ao ler o estado da coleta', error instanceof ApiError ? error.message : undefined) }
@@ -39,17 +48,34 @@ async function syncNow(): Promise<void> {
     const connections = (await api.get<GitHubConnection[]>('/github/connections')).filter((item) => item.status !== 'demo')
     if (!connections.length) { toasts.warning('Nenhuma conexão GitHub ativa'); return }
     await Promise.all(connections.map((connection) => api.post<SyncResponse>(`/github/connections/${connection.id}/sync`)))
-    toasts.success('Coleta iniciada', 'Acompanhe a execução em Fila. O módulo será atualizado quando o worker concluir.')
-    window.setTimeout(() => { void load(true); emit('refreshed') }, 5000)
-  } catch (error) { toasts.error('Não foi possível iniciar a coleta', error instanceof ApiError ? error.message : undefined) }
+    toasts.success('Reconciliação iniciada', 'O realtime continua ativo; a fila apenas completa/enriquece dados que o webhook não trouxe.')
+    window.setTimeout(() => { void load(true); emit('refreshed') }, 2500)
+  } catch (error) { toasts.error('Não foi possível iniciar a reconciliação', error instanceof ApiError ? error.message : undefined) }
   finally { syncing.value = false }
+}
+
+function handleRealtime(event: Event): void {
+  const detail = (event as CustomEvent<RealtimeEvent>).detail
+  if (!detail || detail.type !== realtimeType.value) return
+  window.clearTimeout(realtimeTimer)
+  // O backend publica somente depois do commit das tabelas operacionais.
+  realtimeTimer = window.setTimeout(() => {
+    void load(true)
+    emit('refreshed')
+  }, 80)
 }
 
 onMounted(() => {
   void load()
-  timer = window.setInterval(() => void load(true), 15000)
+  window.addEventListener(REALTIME_EVENT, handleRealtime)
+  // Fallback de reconciliação visual. Não é o caminho normal do monitoramento.
+  timer = window.setInterval(() => { void load(true); emit('refreshed') }, 60_000)
 })
-onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
+onBeforeUnmount(() => {
+  window.removeEventListener(REALTIME_EVENT, handleRealtime)
+  window.clearTimeout(realtimeTimer)
+  if (timer) window.clearInterval(timer)
+})
 </script>
 
 <template>
@@ -61,7 +87,7 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
       <span v-else>Nenhum repositório monitorado.</span>
       <details v-if="module.errors.length"><summary>{{ module.error_repositories }} repositório(s) com erro/permissão</summary><ul><li v-for="error in module.errors" :key="error">{{ error }}</li></ul></details>
     </div>
-    <button class="button secondary compact" :disabled="syncing" @click="syncNow"><RefreshCw :size="14" :class="{spin:syncing}" />{{ syncing ? 'Coletando…' : 'Sincronizar agora' }}</button>
+    <button class="button secondary compact" :disabled="syncing" @click="syncNow"><RefreshCw :size="14" :class="{spin:syncing}" />{{ syncing ? 'Reconciliando…' : 'Reconciliar agora' }}</button>
   </section>
 </template>
 

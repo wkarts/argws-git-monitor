@@ -39,6 +39,9 @@ EXPECTED_OPERATIONAL_PATHS = {
     "/api/v1/external/v1/repositories/{repository_id}/actions",
     "/api/v1/backup-lifecycle/{repository_id}/complete",
     "/api/v1/storage-hub/overview",
+    "/api/v1/storage-hub/internal-buckets",
+    "/api/v1/storage-hub/internal-buckets/{provider_id}",
+    "/api/v1/storage-hub/internal-buckets/{provider_id}/test",
     "/api/v1/storage-hub/backups/run",
     "/api/v1/storage-hub/backups/{snapshot_id}/copy",
     "/api/v1/operations/status",
@@ -104,6 +107,9 @@ def test_openapi_exposes_v060_realtime_and_control_operations() -> None:
     assert "put" in paths["/api/v1/external/v1/repositories/{repository_id}/actions"]
     assert "post" in paths["/api/v1/backup-lifecycle/{repository_id}/complete"]
     assert "get" in paths["/api/v1/storage-hub/overview"]
+    assert "post" in paths["/api/v1/storage-hub/internal-buckets"]
+    assert "delete" in paths["/api/v1/storage-hub/internal-buckets/{provider_id}"]
+    assert "post" in paths["/api/v1/storage-hub/internal-buckets/{provider_id}/test"]
     assert "post" in paths["/api/v1/storage-hub/backups/run"]
     assert "post" in paths["/api/v1/storage-hub/backups/{snapshot_id}/copy"]
 
