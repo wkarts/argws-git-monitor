@@ -95,10 +95,25 @@ async function refreshShellData(): Promise<void> {
       .reverse()
     dashboard.recent_notifications.forEach((item) => knownNotificationIds.add(item.id))
 
-    // Toda comunicação visual permanece dentro do ARGWS Git Monitor. Não usamos
-    // Web Notifications nem caixas do navegador/sistema operacional.
-    for (const item of incoming) {
-      toasts.info(item.title, item.message)
+    // Push/Web Notifications continuam sendo notificações. O DialogHost é usado
+    // somente para dialogs de confirmação/entrada, nunca como substituto do push.
+    if ('Notification' in window && Notification.permission === 'granted') {
+      for (const item of incoming) {
+        try {
+          const notice = new Notification(item.title, {
+            body: item.message,
+            icon: '/pwa-192x192.png',
+            tag: item.id
+          })
+          notice.onclick = () => {
+            window.focus()
+            void router.push('/notifications')
+            notice.close()
+          }
+        } catch {
+          // Em background a entrega pode depender do Service Worker/Web Push.
+        }
+      }
     }
   } catch {
     // A página ativa apresenta o erro específico; o shell não duplica ruído.
