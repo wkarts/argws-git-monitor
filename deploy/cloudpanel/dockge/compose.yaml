@@ -1,7 +1,7 @@
 name: ${COMPOSE_PROJECT_NAME:-argws-git-monitor}
 
 # CloudPanel + Dockge: app publicada via porta local e reverse proxy do CloudPanel.
-# Dados e logs permanecem em ./data-* dentro da pasta da stack.
+# Dados, backups, MinIO e logs permanecem em ./data-* dentro da pasta da stack.
 
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-ARGWS Git Monitor}
@@ -18,6 +18,8 @@ x-app-environment: &app-environment
   REDIS_URL: redis://redis:6379/0
   CELERY_BROKER_URL: amqp://${RABBITMQ_DEFAULT_USER:-gitmonitor}:${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS obrigatória}@rabbitmq:5672//
   CELERY_RESULT_BACKEND: redis://redis:6379/1
+  MINIO_INTERNAL_ENDPOINT: http://minio:9000
+  MINIO_INTERNAL_ACCESS_KEY: ${MINIO_INTERNAL_ACCESS_KEY:-argws-internal}
   INITIAL_ADMIN_NAME: ${INITIAL_ADMIN_NAME:-Administrador ARGWS}
   INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-admin@argws.com.br}
   INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD obrigatória}
@@ -37,6 +39,7 @@ x-api-service: &api-service
   environment: *app-environment
   volumes:
     - ./data-logs:/var/log/argws-stack
+    - ./data-backups:/data/backups
   networks: [gitmonitor]
   security_opt: ["no-new-privileges:true"]
   init: true
@@ -46,16 +49,11 @@ services:
     image: alpine:3.21
     restart: "no"
     user: "0:0"
-    command:
-      - sh
-      - -ec
-      - |
-        for dir in api worker beat migrate web postgres redis rabbitmq; do
-          mkdir -p "/logs/$dir"
-        done
-        chmod -R a+rwx /logs
+    command: ["sh","-ec","for dir in api worker beat migrate web postgres redis rabbitmq minio; do mkdir -p /logs/$dir; done; mkdir -p /backups /minio-data; chmod -R a+rwx /logs; chown -R 10001:10001 /backups; chmod -R u+rwX,go-rwx /backups"]
     volumes:
       - ./data-logs:/logs
+      - ./data-backups:/backups
+      - ./data-minio:/minio-data
     security_opt: ["no-new-privileges:true"]
 
   postgres:
@@ -66,35 +64,20 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-gitmonitor}
       POSTGRES_USER: ${POSTGRES_USER:-gitmonitor}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD obrigatória}
-    volumes:
-      - ./data-postgres:/var/lib/postgresql/data
-      - ./data-logs/postgres:/var/log/postgresql
+    volumes: ["./data-postgres:/var/lib/postgresql/data","./data-logs/postgres:/var/log/postgresql"]
     networks: [gitmonitor]
-    depends_on:
-      logs-init: { condition: service_completed_successfully }
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gitmonitor} -d ${POSTGRES_DB:-gitmonitor}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+    depends_on: { logs-init: { condition: service_completed_successfully } }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gitmonitor} -d ${POSTGRES_DB:-gitmonitor}"], interval: 10s, timeout: 5s, retries: 10, start_period: 10s }
     security_opt: ["no-new-privileges:true"]
 
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
     command: ["redis-server","--appendonly","yes","--save","60","1000","--logfile","/var/log/redis/redis.log"]
-    volumes:
-      - ./data-redis:/data
-      - ./data-logs/redis:/var/log/redis
+    volumes: ["./data-redis:/data","./data-logs/redis:/var/log/redis"]
     networks: [gitmonitor]
-    depends_on:
-      logs-init: { condition: service_completed_successfully }
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+    depends_on: { logs-init: { condition: service_completed_successfully } }
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 10s, timeout: 5s, retries: 10 }
     security_opt: ["no-new-privileges:true"]
 
   rabbitmq:
@@ -105,72 +88,61 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS obrigatória}
       RABBITMQ_LOGS: /var/log/rabbitmq/rabbit.log
       RABBITMQ_SASL_LOGS: /var/log/rabbitmq/rabbit-sasl.log
-    volumes:
-      - ./data-rabbitmq:/var/lib/rabbitmq
-      - ./data-logs/rabbitmq:/var/log/rabbitmq
-    ports:
-      - "127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes: ["./data-rabbitmq:/var/lib/rabbitmq","./data-logs/rabbitmq:/var/log/rabbitmq"]
+    ports: ["127.0.0.1:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"]
     networks: [gitmonitor]
-    depends_on:
-      logs-init: { condition: service_completed_successfully }
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 8s
-      retries: 12
-      start_period: 20s
+    depends_on: { logs-init: { condition: service_completed_successfully } }
+    healthcheck: { test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"], interval: 10s, timeout: 8s, retries: 12, start_period: 20s }
+    security_opt: ["no-new-privileges:true"]
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_INTERNAL_ACCESS_KEY:-argws-internal}
+      MINIO_ROOT_PASSWORD: ${APP_SECRET_KEY:?APP_SECRET_KEY obrigatória}
+    volumes: ["./data-minio:/data"]
+    networks: [gitmonitor]
+    depends_on: { logs-init: { condition: service_completed_successfully } }
     security_opt: ["no-new-privileges:true"]
 
   migrate:
     <<: *api-service
     command: ["migrate"]
     restart: "no"
-    environment:
-      <<: *app-environment
-      SERVICE_ROLE: migrate
-      LOG_FILE: /var/log/argws-stack/migrate/migrate.log
+    environment: { <<: *app-environment, SERVICE_ROLE: migrate, LOG_FILE: /var/log/argws-stack/migrate/migrate.log }
     healthcheck: { disable: true }
-    depends_on:
-      postgres: { condition: service_healthy }
+    depends_on: { postgres: { condition: service_healthy } }
 
   api:
     <<: *api-service
     restart: unless-stopped
     command: ["api"]
-    environment:
-      <<: *app-environment
-      SERVICE_ROLE: api
-      LOG_FILE: /var/log/argws-stack/api/api.log
-      API_WORKERS: ${API_WORKERS:-2}
+    environment: { <<: *app-environment, SERVICE_ROLE: api, LOG_FILE: /var/log/argws-stack/api/api.log, API_WORKERS: "${API_WORKERS:-2}" }
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      minio: { condition: service_started }
 
   worker:
     <<: *api-service
     restart: unless-stopped
     command: ["worker"]
-    environment:
-      <<: *app-environment
-      SERVICE_ROLE: worker
-      LOG_FILE: /var/log/argws-stack/worker/worker.log
-      CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-2}
-      CELERY_MAX_TASKS_PER_CHILD: ${CELERY_MAX_TASKS_PER_CHILD:-100}
+    environment: { <<: *app-environment, SERVICE_ROLE: worker, LOG_FILE: /var/log/argws-stack/worker/worker.log, CELERY_CONCURRENCY: "${CELERY_CONCURRENCY:-2}", CELERY_MAX_TASKS_PER_CHILD: "${CELERY_MAX_TASKS_PER_CHILD:-100}" }
     healthcheck: { disable: true }
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      minio: { condition: service_started }
 
   beat:
     <<: *api-service
     restart: unless-stopped
     command: ["beat"]
-    environment:
-      <<: *app-environment
-      SERVICE_ROLE: beat
-      LOG_FILE: /var/log/argws-stack/beat/beat.log
+    environment: { <<: *app-environment, SERVICE_ROLE: beat, LOG_FILE: /var/log/argws-stack/beat/beat.log }
     healthcheck: { disable: true }
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -181,13 +153,10 @@ services:
     image: ${WEB_IMAGE:-ghcr.io/wkarts/argws-git-monitor-web}:latest
     pull_policy: always
     restart: unless-stopped
-    volumes:
-      - ./data-logs/web:/var/log/nginx
-    ports:
-      - "127.0.0.1:${APP_HTTP_PORT:-8080}:80"
+    volumes: ["./data-logs/web:/var/log/nginx"]
+    ports: ["127.0.0.1:${APP_HTTP_PORT:-8080}:80"]
     networks: [gitmonitor]
-    depends_on:
-      api: { condition: service_healthy }
+    depends_on: { api: { condition: service_healthy } }
     security_opt: ["no-new-privileges:true"]
 
 networks:
