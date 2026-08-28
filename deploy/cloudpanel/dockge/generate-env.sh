@@ -22,9 +22,10 @@ done
 PUBLIC_URL="${PUBLIC_URL%/}"
 mkdir -p \
   "$ROOT/data-postgres" "$ROOT/data-redis" "$ROOT/data-rabbitmq" \
+  "$ROOT/data-minio" "$ROOT/data-backups" \
   "$ROOT/data-logs/api" "$ROOT/data-logs/worker" "$ROOT/data-logs/beat" \
   "$ROOT/data-logs/migrate" "$ROOT/data-logs/web" "$ROOT/data-logs/postgres" \
-  "$ROOT/data-logs/redis" "$ROOT/data-logs/rabbitmq"
+  "$ROOT/data-logs/redis" "$ROOT/data-logs/rabbitmq" "$ROOT/data-logs/minio"
 
 if [[ -f "$ENV_PATH" && "$FORCE" != true ]]; then
   echo "$ENV_PATH já existe. Use --force para substituir."
@@ -65,6 +66,7 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 RABBITMQ_DEFAULT_USER=gitmonitor
 RABBITMQ_DEFAULT_PASS=${RABBIT_PASSWORD}
 RABBITMQ_MANAGEMENT_PORT=15672
+MINIO_INTERNAL_ACCESS_KEY=argws-internal
 GITHUB_API_URL=https://api.github.com
 GITHUB_WEBHOOK_SECRET=${WEBHOOK_SECRET}
 GITHUB_REPOSITORY_LIMIT=300
@@ -91,5 +93,7 @@ Dados persistentes:
 - $ROOT/data-postgres
 - $ROOT/data-redis
 - $ROOT/data-rabbitmq
+- $ROOT/data-minio
+- $ROOT/data-backups
 - $ROOT/data-logs
 EOF
