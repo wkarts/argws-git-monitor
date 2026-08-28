@@ -19,16 +19,26 @@ type State = 'stopped' | 'connecting' | 'connected' | 'reconnecting'
 
 const EVENT_NAME = 'argws:realtime'
 const STATE_EVENT_NAME = 'argws:realtime-state'
+const WATCHDOG_INTERVAL_MS = 15_000
+const STALE_CONNECTION_MS = 55_000
 
 let socket: WebSocket | null = null
+let connectPromise: Promise<void> | null = null
 let reconnectTimer: number | undefined
+let watchdogTimer: number | undefined
 let reconnectAttempt = 0
 let explicitlyStopped = true
 let state: State = 'stopped'
+let generation = 0
+let lastMessageAt = 0
 
 function emitState(next: State): void {
   state = next
-  window.dispatchEvent(new CustomEvent(STATE_EVENT_NAME, { detail: { state: next } }))
+  window.dispatchEvent(
+    new CustomEvent(STATE_EVENT_NAME, {
+      detail: { state: next, lastMessageAt: lastMessageAt || null }
+    })
+  )
 }
 
 function wsUrl(path: string, ticket: string): string {
@@ -45,47 +55,101 @@ function clearReconnect(): void {
   }
 }
 
+function stopWatchdog(): void {
+  if (watchdogTimer !== undefined) {
+    window.clearInterval(watchdogTimer)
+    watchdogTimer = undefined
+  }
+}
+
+function startWatchdog(): void {
+  if (watchdogTimer !== undefined) return
+  watchdogTimer = window.setInterval(() => {
+    const current = socket
+    if (!current || current.readyState !== WebSocket.OPEN || explicitlyStopped) return
+    if (lastMessageAt && Date.now() - lastMessageAt > STALE_CONNECTION_MS) {
+      socket = null
+      current.close(4000, 'realtime-stale')
+      scheduleReconnect()
+    }
+  }, WATCHDOG_INTERVAL_MS)
+}
+
 function scheduleReconnect(): void {
   if (explicitlyStopped || !navigator.onLine || !readAuthSession()?.accessToken) return
-  clearReconnect()
+  if (reconnectTimer !== undefined) return
   reconnectAttempt += 1
-  const base = Math.min(30_000, 1_000 * 2 ** Math.min(reconnectAttempt - 1, 5))
-  const jitter = Math.floor(Math.random() * Math.min(1_000, base / 4))
+  const base = Math.min(15_000, 750 * 2 ** Math.min(reconnectAttempt - 1, 5))
+  const jitter = Math.floor(Math.random() * Math.min(750, base / 4))
   emitState('reconnecting')
-  reconnectTimer = window.setTimeout(() => void connect(), base + jitter)
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = undefined
+    void connect()
+  }, base + jitter)
+}
+
+function closeSocket(reason: string): void {
+  if (!socket) return
+  const current = socket
+  socket = null
+  try { current.close(1000, reason) } catch { /* conexão já encerrada */ }
 }
 
 async function connect(): Promise<void> {
   if (explicitlyStopped || socket || !navigator.onLine || !readAuthSession()?.accessToken) return
-  emitState(reconnectAttempt > 0 ? 'reconnecting' : 'connecting')
-  try {
-    const ticket = await api.post<RealtimeTicket>('/realtime/ticket')
-    if (explicitlyStopped) return
-    const ws = new WebSocket(wsUrl(ticket.websocket_path, ticket.ticket))
-    socket = ws
+  if (connectPromise) return connectPromise
 
-    ws.onopen = () => {
-      reconnectAttempt = 0
-      emitState('connected')
-    }
-    ws.onmessage = (message) => {
-      try {
-        const event = JSON.parse(String(message.data)) as RealtimeEvent
-        window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: event }))
-      } catch {
-        // Ignora quadros inválidos sem derrubar o canal realtime.
+  const attemptGeneration = generation
+  connectPromise = (async () => {
+    emitState(reconnectAttempt > 0 ? 'reconnecting' : 'connecting')
+    try {
+      const ticket = await api.post<RealtimeTicket>('/realtime/ticket')
+      if (
+        explicitlyStopped
+        || attemptGeneration !== generation
+        || socket
+        || !navigator.onLine
+        || !readAuthSession()?.accessToken
+      ) return
+
+      const ws = new WebSocket(wsUrl(ticket.websocket_path, ticket.ticket))
+      socket = ws
+
+      ws.onopen = () => {
+        if (socket !== ws) {
+          ws.close(1000, 'superseded')
+          return
+        }
+        reconnectAttempt = 0
+        lastMessageAt = Date.now()
+        clearReconnect()
+        startWatchdog()
+        emitState('connected')
       }
-    }
-    ws.onerror = () => {
-      // onclose agenda a reconexão e evita tentativas duplicadas.
-    }
-    ws.onclose = () => {
-      if (socket === ws) socket = null
+      ws.onmessage = (message) => {
+        if (socket !== ws) return
+        lastMessageAt = Date.now()
+        try {
+          const event = JSON.parse(String(message.data)) as RealtimeEvent
+          window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: event }))
+        } catch {
+          // Um frame inválido é descartado; o canal saudável não é derrubado.
+        }
+      }
+      ws.onerror = () => {
+        // onclose é o único responsável pelo backoff para impedir reconexões duplas.
+      }
+      ws.onclose = () => {
+        if (socket === ws) socket = null
+        if (!explicitlyStopped) scheduleReconnect()
+      }
+    } catch {
       scheduleReconnect()
+    } finally {
+      connectPromise = null
     }
-  } catch {
-    scheduleReconnect()
-  }
+  })()
+  return connectPromise
 }
 
 function handleOnline(): void {
@@ -93,12 +157,9 @@ function handleOnline(): void {
 }
 
 function handleOffline(): void {
+  generation += 1
   clearReconnect()
-  if (socket) {
-    const current = socket
-    socket = null
-    current.close(1000, 'offline')
-  }
+  closeSocket('offline')
   if (!explicitlyStopped) emitState('reconnecting')
 }
 
@@ -106,30 +167,39 @@ export const realtime = {
   get state(): State {
     return state
   },
+  get lastMessageAt(): number {
+    return lastMessageAt
+  },
   start(): void {
+    if (!explicitlyStopped) {
+      void connect()
+      return
+    }
     explicitlyStopped = false
+    generation += 1
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    startWatchdog()
     void connect()
   },
   stop(): void {
+    if (explicitlyStopped && !socket && !connectPromise) return
     explicitlyStopped = true
+    generation += 1
     clearReconnect()
+    stopWatchdog()
     window.removeEventListener('online', handleOnline)
     window.removeEventListener('offline', handleOffline)
-    if (socket) {
-      const current = socket
-      socket = null
-      current.close(1000, 'client-stop')
-    }
+    closeSocket('client-stop')
     reconnectAttempt = 0
+    lastMessageAt = 0
     emitState('stopped')
   },
   syncAuthentication(): void {
     if (readAuthSession()?.accessToken) {
       if (explicitlyStopped) this.start()
       else void connect()
-    } else if (!explicitlyStopped || socket) {
+    } else if (!explicitlyStopped || socket || connectPromise) {
       this.stop()
     }
   }
