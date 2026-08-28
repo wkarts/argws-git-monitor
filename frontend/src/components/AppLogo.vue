@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { api } from '../services/api'
+
 withDefaults(
   defineProps<{
     compact?: boolean
@@ -6,6 +9,16 @@ withDefaults(
   }>(),
   { compact: false, size: 40 }
 )
+
+const version = ref('')
+onMounted(async () => {
+  try {
+    const runtime = await api.get<{ version: string }>('/health/live')
+    version.value = runtime.version
+  } catch {
+    version.value = ''
+  }
+})
 </script>
 
 <template>
@@ -29,9 +42,12 @@ withDefaults(
         </linearGradient>
       </defs>
     </svg>
-    <div v-if="!compact" class="app-logo-copy">
-      <strong>ARGWS</strong>
-      <span>Git Monitor</span>
+    <div v-if="!compact" class="app-logo-stack">
+      <div class="app-logo-copy">
+        <strong>ARGWS</strong>
+        <span>Git Monitor</span>
+      </div>
+      <small v-if="version" class="app-version">v{{ version }}</small>
     </div>
   </div>
 </template>
@@ -46,6 +62,11 @@ withDefaults(
 .app-logo > svg {
   flex: 0 0 auto;
   filter: drop-shadow(0 0 10px color-mix(in srgb, var(--primary) 22%, transparent));
+}
+.app-logo-stack {
+  display: grid;
+  gap: .24rem;
+  min-width: 0;
 }
 .app-logo-copy {
   display: flex;
@@ -64,5 +85,17 @@ withDefaults(
 }
 .app-logo-copy strong { color: var(--text-strong); }
 .app-logo-copy span { color: var(--text); font-weight: 660; }
+.app-version {
+  width: fit-content;
+  padding: .12rem .38rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  font-size: .54rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: .04em;
+}
 .compact { justify-content: center; }
 </style>

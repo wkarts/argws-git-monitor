@@ -44,12 +44,33 @@ function reportDiagnostic(file, diagnostic) {
   }
 }
 
+// Somente dialogs síncronos do navegador são proibidos. Web Push / Web
+// Notifications são um canal legítimo de notificação da aplicação e não devem
+// ser confundidos com confirm/prompt/alert do browser.
+const forbiddenBrowserUi = [
+  {
+    pattern: /\bwindow\.(?:confirm|prompt|alert)\s*\(/,
+    message: 'não use confirm/prompt/alert nativo; use o DialogHost do ARGWS Git Monitor.'
+  },
+  {
+    pattern: /(^|[^.\w])(?:confirm|prompt|alert)\s*\(/m,
+    message: 'não use confirm/prompt/alert global; use o DialogHost do ARGWS Git Monitor.'
+  }
+]
+
 for (const file of walk(sourceRoot).filter((item) =>
   (item.endsWith('.ts') && !item.endsWith('.d.ts')) || item.endsWith('.vue')
 )) {
   const whole = fs.readFileSync(file, 'utf8')
   let source = whole
   let template = ''
+
+  for (const rule of forbiddenBrowserUi) {
+    if (rule.pattern.test(whole)) {
+      console.error(`${file}: ${rule.message}`)
+      failed = true
+    }
+  }
 
   if (file.endsWith('.vue')) {
     const scriptMatch = whole.match(/<script\s+setup\s+lang="ts">([\s\S]*?)<\/script>/)

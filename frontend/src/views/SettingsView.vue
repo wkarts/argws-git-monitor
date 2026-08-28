@@ -12,6 +12,7 @@ import { usePwaInstall } from '../composables/usePwaInstall'
 import { ApiError, api } from '../services/api'
 import { formatDateTime, formatRelative } from '../services/format'
 import { useAuthStore } from '../stores/auth'
+import { useDialogStore } from '../stores/dialog'
 import { useThemeStore, type ThemePreference } from '../stores/theme'
 import { useToastStore } from '../stores/toast'
 import type {
@@ -39,6 +40,7 @@ interface ConnectionDiagnostics {
 }
 
 const auth = useAuthStore()
+const dialogs = useDialogStore()
 const theme = useThemeStore()
 const toasts = useToastStore()
 const route = useRoute()
@@ -174,9 +176,15 @@ async function syncConnection(connection: GitHubConnection): Promise<void> {
 }
 
 async function removeConnection(connection: GitHubConnection): Promise<void> {
-  const typed = window.prompt(
-    `Remover a conexão “${connection.name}” e os dados locais monitorados?\nOs repositórios do GitHub NÃO serão excluídos.\n\nDigite: ${connection.github_login}`
-  )
+  const typed = await dialogs.askText({
+    title: 'Remover conexão GitHub?',
+    message: `A conexão “${connection.name}” e os dados locais monitorados serão removidos. Os repositórios existentes no GitHub não serão excluídos.`,
+    tone: 'danger',
+    confirmLabel: 'Remover conexão',
+    promptLabel: 'Confirmação obrigatória',
+    promptExpected: connection.github_login,
+    promptPlaceholder: connection.github_login,
+  })
   if (typed !== connection.github_login) return
   try {
     const result = await api.delete<MessageResponse>(`/github/connections/${connection.id}`)
@@ -256,9 +264,13 @@ async function monitorSelected(connection: GitHubConnection, all = false): Promi
 }
 
 async function configureWebhooks(connection: GitHubConnection): Promise<void> {
-  if (!window.confirm(
-    'Configurar webhooks para push, PR, Actions, releases e issues nos projetos monitorados? O token precisa de Webhooks: write.'
-  )) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Configurar webhooks desta conexão?',
+    message: 'Serão configurados webhooks para push, Pull Requests, Actions, releases e issues nos projetos monitorados. O token precisa de Webhooks: write.',
+    tone: 'warning',
+    confirmLabel: 'Configurar webhooks',
+  })
+  if (!accepted) return
   webhookId.value = connection.id
   try {
     const results = await api.post<WebhookConfigureResult[]>(
@@ -330,7 +342,13 @@ async function disableTwoFactor(): Promise<void> {
     toasts.warning('Informe a senha e o código 2FA')
     return
   }
-  if (!window.confirm('Desativar a autenticação em duas etapas desta conta?')) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Desativar autenticação em duas etapas?',
+    message: 'O segundo fator desta conta será desativado. A senha atual e o código 2FA informados ainda serão validados pelo backend.',
+    tone: 'danger',
+    confirmLabel: 'Desativar 2FA',
+  })
+  if (!accepted) return
   try {
     const result = await api.post<MessageResponse>('/auth/2fa/disable', {
       current_password: twoFactorPassword.value,
@@ -356,7 +374,13 @@ async function revokeSession(session: SessionItem): Promise<void> {
 }
 
 async function revokeAllSessions(): Promise<void> {
-  if (!window.confirm('Revogar todas as suas sessões? Você precisará entrar novamente.')) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Revogar todas as sessões?',
+    message: 'Todas as suas sessões serão encerradas e será necessário entrar novamente no ARGWS Git Monitor.',
+    tone: 'danger',
+    confirmLabel: 'Revogar todas',
+  })
+  if (!accepted) return
   try {
     await api.post<MessageResponse>('/auth/sessions/revoke-all')
     await auth.logout()
@@ -559,9 +583,9 @@ onMounted(async () => {
         </article>
 
         <article class="settings-card">
-          <header><div class="card-icon"><BellRing :size="20" /></div><div><span>NOTIFICAÇÕES</span><h3>Avisos do navegador</h3></div><StatusBadge :value="browserPermission === 'granted' ? 'success' : 'warning'" compact /></header>
-          <p class="card-copy">As notificações internas funcionam sempre. O navegador precisa de permissão para exibir avisos enquanto a PWA está ativa.</p>
-          <button class="button secondary" :disabled="browserPermission === 'denied' || browserPermission === 'unsupported'" @click="requestBrowserPermission"><BellRing :size="15" />{{ browserPermission === 'granted' ? 'Permissão concedida' : browserPermission === 'denied' ? 'Bloqueado no navegador' : 'Permitir notificações' }}</button>
+          <header><div class="card-icon"><BellRing :size="20" /></div><div><span>NOTIFICAÇÕES PUSH</span><h3>Avisos do navegador e sistema</h3></div><StatusBadge :value="browserPermission === 'granted' ? 'success' : 'warning'" compact /></header>
+          <p class="card-copy">Push notifications permanecem como notificações nativas. Esta permissão é independente dos dialogs internos de confirmação do Git Monitor.</p>
+          <button class="button secondary" :disabled="browserPermission === 'denied' || browserPermission === 'unsupported'" @click="requestBrowserPermission"><BellRing :size="15" />{{ browserPermission === 'granted' ? 'Permissão concedida' : browserPermission === 'denied' ? 'Bloqueado no navegador' : 'Permitir notificações push' }}</button>
         </article>
 
         <article class="settings-card">

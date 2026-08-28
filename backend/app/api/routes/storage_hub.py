@@ -107,6 +107,10 @@ def _provider_payload(
         "secret_hint": provider.secret_hint,
         "available": state.get("available"),
         "has_objects": state.get("has_objects"),
+        "engine": state.get("engine"),
+        "degraded": bool(state.get("degraded")),
+        "minio_available": state.get("minio_available"),
+        "fallback_available": state.get("fallback_available"),
         "storage_error": state.get("error"),
     }
 
@@ -121,18 +125,21 @@ async def _ensure_internal_bucket(provider: StorageProvider) -> dict[str, Any]:
         return {}
     try:
         await asyncio.to_thread(ensure_bucket, str(config["bucket"]))
-        state = await asyncio.to_thread(bucket_status, str(config["bucket"]))
-        return state
+        return await asyncio.to_thread(bucket_status, str(config["bucket"]))
     except Exception as exc:
         logger.warning(
-            "Bucket interno indisponível: provider=%s error_type=%s",
+            "Storage interno indisponível: provider=%s error_type=%s",
             provider.id,
             type(exc).__name__,
         )
         return {
             "available": False,
             "has_objects": None,
-            "error": "MinIO interno indisponível. Verifique o serviço de object storage.",
+            "engine": "unavailable",
+            "degraded": True,
+            "minio_available": False,
+            "fallback_available": False,
+            "error": "Storage interno indisponível: MinIO e contingência local falharam.",
         }
 
 
@@ -147,11 +154,20 @@ async def _providers_with_state(
         elif (provider.config or {}).get("storage_class") == "internal_local":
             try:
                 details = await asyncio.to_thread(build_storage_adapter(provider).test)
-                state = {"available": bool(details.get("writable", True)), "has_objects": None}
+                state = {
+                    "available": bool(details.get("writable", True)),
+                    "has_objects": None,
+                    "engine": "local",
+                    "degraded": False,
+                    "fallback_available": True,
+                }
             except Exception:
                 state = {
                     "available": False,
                     "has_objects": None,
+                    "engine": "unavailable",
+                    "degraded": True,
+                    "fallback_available": False,
                     "error": "Staging local indisponível.",
                 }
         result.append(_provider_payload(provider, storage_state=state))
@@ -163,8 +179,8 @@ async def storage_overview(
     current_user: CurrentUser,
     db: DbSession,
 ) -> dict[str, Any]:
-    # A criação dos registros internos não depende do MinIO estar online. Assim um
-    # object store temporariamente indisponível nunca derruba a listagem de repos.
+    # Os providers são garantidos mesmo quando o MinIO ainda não faz parte da
+    # topologia instalada. O adapter interno usa /data/backups como contingência.
     await ensure_internal_storage_providers(db, user_id=current_user.id)
     await db.commit()
 
@@ -236,14 +252,17 @@ async def storage_overview(
         or 0
     )
 
-    minio_state: dict[str, Any]
     try:
-        minio_state = await asyncio.to_thread(probe)
+        storage_state = await asyncio.to_thread(probe)
     except Exception as exc:
-        logger.warning("MinIO interno não respondeu: %s", type(exc).__name__)
-        minio_state = {
+        logger.warning("Object storage interno não respondeu: %s", type(exc).__name__)
+        storage_state = {
             "available": False,
-            "error": "MinIO interno não respondeu.",
+            "engine": "unavailable",
+            "degraded": True,
+            "minio_available": False,
+            "fallback_available": False,
+            "error": "Storage interno indisponível.",
         }
 
     return {
@@ -262,13 +281,17 @@ async def storage_overview(
             "repositories": repository_count,
         },
         "internal_storage": {
-            "object_store": "MinIO S3 interno",
-            "engine": "minio",
-            "available": bool(minio_state.get("available")),
-            "error": minio_state.get("error"),
-            "endpoint": minio_state.get("endpoint"),
+            "object_store": "ARGWS Object Storage",
+            "engine": storage_state.get("engine") or "unavailable",
+            "available": bool(storage_state.get("available")),
+            "degraded": bool(storage_state.get("degraded")),
+            "minio_available": bool(storage_state.get("minio_available")),
+            "fallback_available": bool(storage_state.get("fallback_available")),
+            "error": storage_state.get("error"),
+            "endpoint": storage_state.get("endpoint"),
+            "fallback_path": storage_state.get("fallback_path"),
             "local_staging": "Armazenamento local persistente",
-            "deployment_manifest_required": True,
+            "deployment_manifest_required": False,
         },
     }
 
@@ -300,7 +323,7 @@ async def create_internal_bucket(
         logger.warning("Falha ao criar bucket interno: %s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
-            detail="MinIO interno indisponível; o bucket não foi criado.",
+            detail="Storage interno indisponível; MinIO e contingência local não aceitaram o bucket.",
         ) from exc
 
 
@@ -371,7 +394,7 @@ async def remove_internal_bucket(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         logger.warning("Falha ao excluir bucket interno: %s", type(exc).__name__)
-        raise HTTPException(status_code=503, detail="MinIO interno indisponível.") from exc
+        raise HTTPException(status_code=503, detail="Storage interno indisponível.") from exc
 
     await db.delete(provider)
     await db.commit()

@@ -2,13 +2,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Activity, Boxes, Play, RefreshCw, RotateCcw, Server, ShieldCheck, Terminal } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { PaginatedResponse, Repository } from '../types/api'
 
 interface DeploymentTarget { id:string; repository_id:string|null; name:string; environment:string; strategy:string; host:string; port:number; username:string; working_directory:string; domain:string|null; healthcheck_url:string|null; config:Record<string,unknown>; enabled:boolean; created_at:string; updated_at:string }
 interface DeploymentRecord { id:string; target_id:string; repository_id:string|null; job_id:string|null; status:string; requested_ref:string|null; previous_version:Record<string,unknown>; deployed_version:Record<string,unknown>; pipeline:Array<Record<string,unknown>>; health_result:Record<string,unknown>; error:string|null; started_at:string|null; completed_at:string|null; created_at:string }
 
-const toasts=useToastStore(); const loading=ref(true); const busy=ref(''); const repositories=ref<Repository[]>([]); const targets=ref<DeploymentTarget[]>([]); const deployments=ref<DeploymentRecord[]>([])
+const dialogs=useDialogStore(); const toasts=useToastStore(); const loading=ref(true); const busy=ref(''); const repositories=ref<Repository[]>([]); const targets=ref<DeploymentTarget[]>([]); const deployments=ref<DeploymentRecord[]>([])
 const targetForm=reactive({repository_id:'',name:'Produção',environment:'production',strategy:'docker_compose',host:'',port:22,username:'deploy',working_directory:'/home/deploy/app',domain:'',healthcheck_url:'',configText:'{"compose_file":"compose.yaml"}',secretText:'{}'})
 const deployForm=reactive({target_id:'',repository_id:'',ref:'main',release_url:'',checksum_sha256:'',confirmation:''})
 const selectedTarget=computed(()=>targets.value.find(x=>x.id===deployForm.target_id)||null)
@@ -24,32 +25,44 @@ async function run(key:string,fn:()=>Promise<void>){busy.value=key;try{await fn(
 async function createTarget(){await run('create-target',async()=>{const created=await api.post<DeploymentTarget>('/platform/deployment-targets',{repository_id:targetForm.repository_id||null,name:targetForm.name,environment:targetForm.environment,strategy:targetForm.strategy,host:targetForm.host,port:targetForm.port,username:targetForm.username,working_directory:targetForm.working_directory,domain:targetForm.domain||null,healthcheck_url:targetForm.healthcheck_url||null,config:jsonObject(targetForm.configText),secret:jsonObject(targetForm.secretText),enabled:true});targetForm.secretText='{}';toasts.success('Deployment Target criado',`${created.name} · ${created.host}`);await load();deployForm.target_id=created.id})}
 async function testTarget(target:DeploymentTarget){await run(`test-${target.id}`,async()=>{const result=await api.post<{ok:boolean;message:string;details:unknown}>(`/platform/deployment-targets/${target.id}/test`,{});result.ok?toasts.success('SSH validado',result.message):toasts.error('Target indisponível',result.message)})}
 function prepareDeploy(target:DeploymentTarget){deployForm.target_id=target.id;if(target.repository_id)deployForm.repository_id=target.repository_id;const repo=repositories.value.find(r=>r.id===deployForm.repository_id);deployForm.ref=repo?.default_branch||'main';deployForm.confirmation=`DEPLOY ${target.name} ${deployForm.ref}`;document.getElementById('deploy-execute')?.scrollIntoView({behavior:'smooth'})}
-async function deployNow(){if(!selectedTarget.value)return;deployForm.confirmation=`DEPLOY ${selectedTarget.value.name} ${deployForm.ref}`;const confirmed=window.prompt(`Deployment remoto em ${selectedTarget.value.environment}.\n\nDigite exatamente:\n${deployForm.confirmation}`);if(confirmed!==deployForm.confirmation)return;await run('deploy',async()=>{const result=await api.post<{job_id:string}>(`/platform/deployment-targets/${selectedTarget.value!.id}/deploy`,{repository_id:deployForm.repository_id,ref:deployForm.ref,release_url:deployForm.release_url||null,checksum_sha256:deployForm.checksum_sha256||null,confirmation:confirmed});toasts.success('Deploy enfileirado',`Job ${result.job_id}. Pipeline e logs estão na Fila.`);await load()})}
-async function rollback(record:DeploymentRecord){const expected=`ROLLBACK ${record.id}`;const confirmation=window.prompt(`Rollback não é executado cegamente.\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run(`rollback-${record.id}`,async()=>{const result=await api.post<{job_id:string}>(`/platform/deployments/${record.id}/rollback`,{confirmation});toasts.success('Rollback enfileirado',`Job ${result.job_id}`)})}
+async function deployNow(){
+  if(!selectedTarget.value)return
+  deployForm.confirmation=`DEPLOY ${selectedTarget.value.name} ${deployForm.ref}`
+  const confirmed=await dialogs.askText({
+    title:'Confirmar deployment remoto',
+    message:`Ambiente: ${selectedTarget.value.environment}\nTarget: ${selectedTarget.value.name}\nRef: ${deployForm.ref}`,
+    tone:'warning',
+    confirmLabel:'Executar deploy',
+    promptLabel:'Confirmação obrigatória',
+    promptExpected:deployForm.confirmation,
+    promptPlaceholder:deployForm.confirmation,
+  })
+  if(confirmed!==deployForm.confirmation)return
+  await run('deploy',async()=>{const result=await api.post<{job_id:string}>(`/platform/deployment-targets/${selectedTarget.value!.id}/deploy`,{repository_id:deployForm.repository_id,ref:deployForm.ref,release_url:deployForm.release_url||null,checksum_sha256:deployForm.checksum_sha256||null,confirmation:confirmed});toasts.success('Deploy enfileirado',`Job ${result.job_id}. Pipeline e logs estão na Fila.`);await load()})
+}
+async function rollback(record:DeploymentRecord){
+  const expected=`ROLLBACK ${record.id}`
+  const confirmation=await dialogs.askText({
+    title:'Confirmar rollback',
+    message:'Rollback não é executado cegamente. Confirme o identificador da implantação antes de prosseguir.',
+    tone:'danger',
+    confirmLabel:'Executar rollback',
+    promptLabel:'Confirmação obrigatória',
+    promptExpected:expected,
+    promptPlaceholder:expected,
+  })
+  if(confirmation!==expected)return
+  await run(`rollback-${record.id}`,async()=>{const result=await api.post<{job_id:string}>(`/platform/deployments/${record.id}/rollback`,{confirmation});toasts.success('Rollback enfileirado',`Job ${result.job_id}`)})
+}
 onMounted(load)
 </script>
 
 <template><div class="page-stack">
   <section class="page-heading"><div><span class="eyebrow">DELIVERY E INFRAESTRUTURA</span><h2>Deployment Manager</h2><p>VPS, CloudPanel via SSH controlado, Docker Compose, releases, healthcheck e rollback auditável.</p></div><button class="button secondary" :disabled="loading" @click="load"><RefreshCw :size="16"/>Atualizar</button></section>
   <section class="notice"><ShieldCheck :size="18"/><div><strong>Sem endpoints inventados do CloudPanel</strong><span>Quando não existe API oficial suportada, o target usa SSH/agent e comandos explicitamente configurados. O Git Monitor não monta Docker Socket no container da API.</span></div></section>
-
-  <section class="panel"><header><div><strong>Novo Deployment Target</strong><span>Cadastre desenvolvimento, homologação, staging, produção ou servidor personalizado.</span></div><Server :size="20"/></header>
-    <div class="grid cols-3"><label class="field"><span>Nome</span><input v-model="targetForm.name"/></label><label class="field"><span>Ambiente</span><input v-model="targetForm.environment" placeholder="production"/></label><label class="field"><span>Estratégia</span><select v-model="targetForm.strategy"><option value="git">Git Deployment</option><option value="release">Release Deployment</option><option value="docker_compose">Docker Compose</option></select></label></div>
-    <div class="grid cols-3"><label class="field"><span>Repositório</span><select v-model="targetForm.repository_id"><option value="">Sem vínculo fixo</option><option v-for="repo in repositories" :key="repo.id" :value="repo.id">{{repo.full_name}}</option></select></label><label class="field"><span>Host</span><input v-model="targetForm.host"/></label><label class="field"><span>Porta SSH</span><input v-model.number="targetForm.port" type="number" min="1" max="65535"/></label></div>
-    <div class="grid cols-2"><label class="field"><span>Usuário SSH</span><input v-model="targetForm.username"/></label><label class="field"><span>Diretório</span><input v-model="targetForm.working_directory"/></label></div>
-    <div class="grid cols-2"><label class="field"><span>Domínio</span><input v-model="targetForm.domain" placeholder="app.exemplo.com"/></label><label class="field"><span>Healthcheck URL</span><input v-model="targetForm.healthcheck_url" placeholder="https://app.exemplo.com/health"/></label></div>
-    <div class="grid cols-2"><label class="field"><span>Config JSON</span><textarea v-model="targetForm.configText" class="code"/></label><label class="field"><span>Credencial JSON</span><textarea v-model="targetForm.secretText" class="code" placeholder='{"private_key":"..."} ou {"password":"..."}'/></label></div>
-    <button class="button primary" :disabled="busy==='create-target'||!targetForm.host" @click="createTarget"><Server :size="15"/>Salvar target</button>
-  </section>
-
+  <section class="panel"><header><div><strong>Novo Deployment Target</strong><span>Cadastre desenvolvimento, homologação, staging, produção ou servidor personalizado.</span></div><Server :size="20"/></header><div class="grid cols-3"><label class="field"><span>Nome</span><input v-model="targetForm.name"/></label><label class="field"><span>Ambiente</span><input v-model="targetForm.environment" placeholder="production"/></label><label class="field"><span>Estratégia</span><select v-model="targetForm.strategy"><option value="git">Git Deployment</option><option value="release">Release Deployment</option><option value="docker_compose">Docker Compose</option></select></label></div><div class="grid cols-3"><label class="field"><span>Repositório</span><select v-model="targetForm.repository_id"><option value="">Sem vínculo fixo</option><option v-for="repo in repositories" :key="repo.id" :value="repo.id">{{repo.full_name}}</option></select></label><label class="field"><span>Host</span><input v-model="targetForm.host"/></label><label class="field"><span>Porta SSH</span><input v-model.number="targetForm.port" type="number" min="1" max="65535"/></label></div><div class="grid cols-2"><label class="field"><span>Usuário SSH</span><input v-model="targetForm.username"/></label><label class="field"><span>Diretório</span><input v-model="targetForm.working_directory"/></label></div><div class="grid cols-2"><label class="field"><span>Domínio</span><input v-model="targetForm.domain" placeholder="app.exemplo.com"/></label><label class="field"><span>Healthcheck URL</span><input v-model="targetForm.healthcheck_url" placeholder="https://app.exemplo.com/health"/></label></div><div class="grid cols-2"><label class="field"><span>Config JSON</span><textarea v-model="targetForm.configText" class="code"/></label><label class="field"><span>Credencial JSON</span><textarea v-model="targetForm.secretText" class="code" placeholder='{"private_key":"..."} ou {"password":"..."}'/></label></div><button class="button primary" :disabled="busy==='create-target'||!targetForm.host" @click="createTarget"><Server :size="15"/>Salvar target</button></section>
   <section class="cards"><article v-for="target in targets" :key="target.id" class="card"><header><div><strong>{{target.environment}} · {{target.name}}</strong><span>{{target.strategy}}</span></div><span class="dot" :class="{off:!target.enabled}"/></header><p><b>{{target.username}}@{{target.host}}:{{target.port}}</b><br><code>{{target.working_directory}}</code></p><small>{{target.repository_id?repositoryMap[target.repository_id]:'Target compartilhado'}} · {{target.healthcheck_url||'sem healthcheck'}}</small><div class="actions"><button class="button secondary" @click="testTarget(target)"><Activity :size="14"/>Testar</button><button class="button primary" @click="prepareDeploy(target)"><Play :size="14"/>Deploy</button></div></article></section>
-
-  <section id="deploy-execute" class="panel"><header><div><strong>Executar Deployment</strong><span>A confirmação textual é calculada a partir do target e da referência.</span></div><Terminal :size="20"/></header>
-    <div class="grid cols-3"><label class="field"><span>Target</span><select v-model="deployForm.target_id"><option v-for="target in targets" :key="target.id" :value="target.id">{{target.environment}} · {{target.name}}</option></select></label><label class="field"><span>Repositório</span><select v-model="deployForm.repository_id"><option v-for="repo in repositories" :key="repo.id" :value="repo.id">{{repo.full_name}}</option></select></label><label class="field"><span>Ref/tag/commit</span><input v-model="deployForm.ref"/></label></div>
-    <div v-if="selectedTarget?.strategy==='release'" class="grid cols-2"><label class="field"><span>Release URL</span><input v-model="deployForm.release_url"/></label><label class="field"><span>SHA-256</span><input v-model="deployForm.checksum_sha256" maxlength="64"/></label></div>
-    <button class="button primary" :disabled="busy==='deploy'||!selectedTarget||!deployForm.repository_id" @click="deployNow"><Play :size="15"/>Executar Deploy</button>
-  </section>
-
+  <section id="deploy-execute" class="panel"><header><div><strong>Executar Deployment</strong><span>A confirmação textual é calculada a partir do target e da referência.</span></div><Terminal :size="20"/></header><div class="grid cols-3"><label class="field"><span>Target</span><select v-model="deployForm.target_id"><option v-for="target in targets" :key="target.id" :value="target.id">{{target.environment}} · {{target.name}}</option></select></label><label class="field"><span>Repositório</span><select v-model="deployForm.repository_id"><option v-for="repo in repositories" :key="repo.id" :value="repo.id">{{repo.full_name}}</option></select></label><label class="field"><span>Ref/tag/commit</span><input v-model="deployForm.ref"/></label></div><div v-if="selectedTarget?.strategy==='release'" class="grid cols-2"><label class="field"><span>Release URL</span><input v-model="deployForm.release_url"/></label><label class="field"><span>SHA-256</span><input v-model="deployForm.checksum_sha256" maxlength="64"/></label></div><button class="button primary" :disabled="busy==='deploy'||!selectedTarget||!deployForm.repository_id" @click="deployNow"><Play :size="15"/>Executar Deploy</button></section>
   <section class="panel table-panel"><header><div><strong>Histórico e Pipelines</strong><span>Estado anterior, versão implantada, healthcheck e rollback.</span></div><Boxes :size="19"/></header><div class="table-wrap"><table><thead><tr><th>Ambiente</th><th>Repositório</th><th>Ref</th><th>Status</th><th>Health</th><th>Data</th><th></th></tr></thead><tbody><tr v-for="record in deployments" :key="record.id"><td>{{targetMap[record.target_id]||record.target_id}}</td><td>{{record.repository_id?repositoryMap[record.repository_id]:'—'}}</td><td><code>{{record.requested_ref||'—'}}</code></td><td><span class="status" :class="statusClass(record.status)">{{record.status}}</span></td><td>{{record.health_result?.ok===true?'OK':record.health_result?.ok===false?'Falhou':'—'}}</td><td>{{when(record.created_at)}}</td><td><button class="button ghost" :disabled="record.status==='running'" @click="rollback(record)"><RotateCcw :size="14"/>Rollback</button></td></tr><tr v-if="!deployments.length"><td colspan="7" class="empty">Nenhum deployment registrado.</td></tr></tbody></table></div></section>
 </div></template>
 

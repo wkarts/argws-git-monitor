@@ -6,11 +6,13 @@ import {
 } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { formatDateTime, formatRelative } from '../services/format'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type {
   InactivityActionLog, InactivityEvaluationResult, InactivityPolicy, PaginatedResponse, Repository
 } from '../types/api'
 
+const dialogs = useDialogStore()
 const toasts = useToastStore()
 const policies = ref<InactivityPolicy[]>([])
 const repositories = ref<Repository[]>([])
@@ -124,9 +126,12 @@ async function savePolicy(): Promise<void> {
   if (!form.activity_sources.length) { toasts.warning('Selecione ao menos uma fonte de atividade'); return }
   if (!form.repository_ids.length) { toasts.warning('Selecione ao menos um repositório'); return }
   if (form.action === 'private' && form.enabled) {
-    const ok = window.confirm(
-      `Esta política poderá tornar ${form.repository_ids.length} repositório(s) PRIVADO(S) automaticamente após o timeout. Deseja salvar?`
-    )
+    const ok = await dialogs.askConfirmation({
+      title: 'Ativar política que pode privar repositórios?',
+      message: `Esta política poderá tornar ${form.repository_ids.length} repositório(s) privado(s) automaticamente após o timeout configurado.`,
+      tone: 'warning',
+      confirmLabel: 'Salvar política ativa',
+    })
     if (!ok) return
   }
   saving.value = true
@@ -152,7 +157,13 @@ async function savePolicy(): Promise<void> {
 }
 
 async function deletePolicy(policy: InactivityPolicy): Promise<void> {
-  if (!window.confirm(`Excluir a política “${policy.name}”? Isso não altera a visibilidade atual dos repositórios.`)) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Excluir política de inatividade?',
+    message: `A política “${policy.name}” será removida. A visibilidade atual dos repositórios não será alterada por esta exclusão.`,
+    tone: 'danger',
+    confirmLabel: 'Excluir política',
+  })
+  if (!accepted) return
   try {
     await api.delete(`/inactivity-policies/${policy.id}`)
     toasts.success('Política removida')
@@ -165,7 +176,15 @@ function evaluationMessage(result: InactivityEvaluationResult): string {
 }
 
 async function evaluatePolicy(policy: InactivityPolicy): Promise<void> {
-  if (policy.action === 'private' && !window.confirm(`Executar agora “${policy.name}”? Repositórios vencidos poderão ser privados imediatamente.`)) return
+  if (policy.action === 'private') {
+    const accepted = await dialogs.askConfirmation({
+      title: 'Executar política agora?',
+      message: `“${policy.name}” será avaliada imediatamente. Repositórios vencidos poderão ser privados nesta execução.`,
+      tone: 'warning',
+      confirmLabel: 'Avaliar agora',
+    })
+    if (!accepted) return
+  }
   evaluating.value = policy.id
   try {
     const result = await api.post<InactivityEvaluationResult>(`/inactivity-policies/${policy.id}/evaluate`)
@@ -176,7 +195,13 @@ async function evaluatePolicy(policy: InactivityPolicy): Promise<void> {
 }
 
 async function evaluateAll(): Promise<void> {
-  if (!window.confirm('Avaliar todas as políticas ativas agora? Políticas de privacidade podem alterar repositórios vencidos.')) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Avaliar todas as políticas agora?',
+    message: 'Todas as políticas ativas serão processadas. Políticas de privacidade podem alterar imediatamente repositórios cujo timeout esteja vencido.',
+    tone: 'warning',
+    confirmLabel: 'Avaliar políticas',
+  })
+  if (!accepted) return
   evaluating.value = 'all'
   try {
     const result = await api.post<InactivityEvaluationResult>('/inactivity-policies/evaluate-all')

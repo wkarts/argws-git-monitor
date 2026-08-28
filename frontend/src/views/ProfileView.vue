@@ -3,10 +3,12 @@ import { computed, reactive, ref, watch } from 'vue'
 import { Camera, CheckCircle2, ImageOff, Save, ShieldCheck, UserRound } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
 import { useAuthStore } from '../stores/auth'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { User } from '../types/api'
 
 const auth = useAuthStore()
+const dialogs = useDialogStore()
 const toasts = useToastStore()
 const saving = ref(false)
 const uploading = ref(false)
@@ -87,7 +89,13 @@ async function uploadAvatar(event: Event): Promise<void> {
 
 async function removeAvatar(): Promise<void> {
   if (!auth.user?.avatar_url) return
-  if (!window.confirm('Remover sua foto de perfil?')) return
+  const accepted = await dialogs.askConfirmation({
+    title: 'Remover foto de perfil?',
+    message: 'A imagem atual será removida da sua conta do ARGWS Git Monitor. Você poderá enviar uma nova foto a qualquer momento.',
+    tone: 'warning',
+    confirmLabel: 'Remover foto',
+  })
+  if (!accepted) return
   try {
     const user = await api.delete<User>('/auth/avatar')
     auth.setUser(user)

@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Activity, Download, FlaskConical, RefreshCw, Search, ShieldCheck, Trash2, TriangleAlert } from 'lucide-vue-next'
 import { ApiError, api } from '../services/api'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { PaginatedResponse, Repository } from '../types/api'
 
@@ -12,7 +13,7 @@ interface CleanupProfile { id:string; repository_id:string; name:string; descrip
 interface CleanupCandidate { id:string; resource_type:string; resource_key:string; resource_id:string|null; action_class:string; reason:string; dependencies:Array<Record<string,unknown>>; protected:boolean; selected:boolean; size_bytes:number|null; metadata:Record<string,unknown> }
 interface CleanupAnalysis { id:string; repository_id:string; profile_id:string|null; job_id:string|null; reference:string; status:string; checkpoint:Record<string,unknown>; preservation_rules:Record<string,unknown>; metrics:Record<string,unknown>; dependency_graph:Record<string,unknown>; plan:Array<Record<string,unknown>>; dry_run:Record<string,unknown>; estimated_reclaimed_bytes:number; result:Record<string,unknown>; error:string|null; created_at:string; completed_at:string|null; candidates:CleanupCandidate[] }
 
-const toasts=useToastStore(); const tab=ref<Tab>('overview'); const loading=ref(true); const busy=ref(''); const repositories=ref<Repository[]>([]); const selectedRepositoryId=ref(''); const clinic=ref<ClinicAnalysis[]>([]); const cleanup=ref<CleanupAnalysis[]>([]); const profiles=ref<CleanupProfile[]>([]); const selectedAnalysisId=ref('');
+const dialogs=useDialogStore(); const toasts=useToastStore(); const tab=ref<Tab>('overview'); const loading=ref(true); const busy=ref(''); const repositories=ref<Repository[]>([]); const selectedRepositoryId=ref(''); const clinic=ref<ClinicAnalysis[]>([]); const cleanup=ref<CleanupAnalysis[]>([]); const profiles=ref<CleanupProfile[]>([]); const selectedAnalysisId=ref('');
 const analyzeForm=reactive({include_deep_git:true,include_actions:true,include_ghcr:true})
 const profileForm=reactive({name:'Manutenção mensal',description:'',criteriaText:'{"runs_failed_days":30,"artifacts_days":30,"cache_days":14,"ghcr_untagged_days":30,"branches_merged_days":60}',preservationText:'{"preserve_default_branch":true,"preserve_latest_release":true,"preserve_last_releases":5,"preserve_protected_branches":true,"preserve_deployment_refs":true,"preserve_latest_image":true}',checkpointText:'{}'})
 const cleanupForm=reactive({profile_id:'',criteriaText:'{}',preservationText:'{}',checkpointText:'{}'})
@@ -38,7 +39,22 @@ async function analyzeCleanup(){await run('cleanup-analyze',async()=>{const r=aw
 async function refreshCleanup(){await loadRepositoryData();if(selectedAnalysisId.value){const item=await api.get<CleanupAnalysis>(`/platform/cleanup/${selectedAnalysisId.value}`);const index=cleanup.value.findIndex(x=>x.id===item.id);if(index>=0)cleanup.value[index]=item;else cleanup.value.unshift(item)}}
 async function saveSelection(){if(!selectedCleanup.value)return;await run('selection',async()=>{const updated=await api.put<CleanupAnalysis>(`/platform/cleanup/${selectedCleanup.value!.id}/selection`,{candidate_ids:selectedIds.value});const index=cleanup.value.findIndex(x=>x.id===updated.id);if(index>=0)cleanup.value[index]=updated;toasts.success('Seleção salva',`${selectedIds.value.length} candidato(s) selecionado(s).`)})}
 async function dryRun(){if(!selectedCleanup.value)return;await run('dry-run',async()=>{await saveSelection();const r=await api.post<{job_id:string}>(`/platform/cleanup/${selectedCleanup.value!.id}/dry-run`,{});toasts.success('Dry Run enfileirado',`Job ${r.job_id}. O engine fará zero chamadas DELETE.`)})}
-async function executeCleanup(){const analysis=selectedCleanup.value;if(!analysis)return;const expected=`EXECUTAR ${analysis.reference}`;const confirmation=window.prompt(`A limpeza executará somente os candidatos selecionados e não protegidos.\n\nDigite exatamente:\n${expected}`);if(confirmation!==expected)return;await run('execute',async()=>{await saveSelection();const r=await api.post<{job_id:string}>(`/platform/cleanup/${analysis.id}/execute`,{confirmation,create_backup:true});toasts.success('Cleanup enfileirado',`Job ${r.job_id}. Itens DESTRUCTIVE exigem backup concluído.`)})}
+async function executeCleanup(){
+  const analysis=selectedCleanup.value
+  if(!analysis)return
+  const expected=`EXECUTAR ${analysis.reference}`
+  const confirmation=await dialogs.askText({
+    title:'Executar Deep Clean?',
+    message:`A limpeza executará somente ${selectedIds.value.length} candidato(s) selecionado(s) e não protegidos. Itens DESTRUCTIVE continuam sujeitos ao backup fail-closed.`,
+    tone:'danger',
+    confirmLabel:'Executar limpeza',
+    promptLabel:'Confirmação obrigatória',
+    promptExpected:expected,
+    promptPlaceholder:expected,
+  })
+  if(confirmation!==expected)return
+  await run('execute',async()=>{await saveSelection();const r=await api.post<{job_id:string}>(`/platform/cleanup/${analysis.id}/execute`,{confirmation,create_backup:true});toasts.success('Cleanup enfileirado',`Job ${r.job_id}. Itens DESTRUCTIVE exigem backup concluído.`)})
+}
 async function exportReport(){if(!selectedCleanup.value)return;await run('report',async()=>{const result=await api.download(`/platform/cleanup/${selectedCleanup.value!.id}/report.json`);const url=URL.createObjectURL(result.blob);const a=document.createElement('a');a.href=url;a.download=result.filename||`${selectedCleanup.value!.reference}.json`;a.click();URL.revokeObjectURL(url)})}
 function toggleAllSafe(){if(!selectedCleanup.value)return;selectedIds.value=selectedCleanup.value.candidates.filter(x=>!x.protected&&x.action_class==='safe').map(x=>x.id)}
 onMounted(load)

@@ -11,6 +11,13 @@ from typing import Any, Iterator
 import httpx
 
 from app.models.platform import StorageProvider
+from app.services.internal_object_store import (
+    bucket_status as internal_bucket_status,
+    delete_object as delete_internal_object,
+    download_file as download_internal_file,
+    ensure_bucket as ensure_internal_bucket,
+    upload_file as upload_internal_file,
+)
 from app.services.secret_store import SecretStore
 from app.services.ssh_security import configure_ssh_host_keys
 
@@ -121,6 +128,55 @@ class S3StorageAdapter(StorageAdapter):
         prefix = f"s3://{self.bucket}/"
         key = location[len(prefix):] if location.startswith(prefix) else location
         self.client.delete_object(Bucket=self.bucket, Key=key)
+
+
+class ManagedInternalStorageAdapter(StorageAdapter):
+    """Bucket interno que prefere MinIO, mas nunca bloqueia backup por topologia antiga.
+
+    O local de cada snapshot fica codificado na própria location. Assim um backup
+    criado durante contingência local continua restaurável mesmo depois que o
+    MinIO voltar a ficar disponível.
+    """
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.bucket = str(config.get("bucket") or "")
+        self.prefix = str(config.get("prefix") or "").strip("/")
+        if not self.bucket:
+            raise StorageProviderError("Bucket interno é obrigatório.")
+
+    def _key(self, key: str) -> str:
+        return f"{self.prefix}/{key}" if self.prefix else key
+
+    def test(self) -> dict[str, Any]:
+        ensure_internal_bucket(self.bucket)
+        state = internal_bucket_status(self.bucket)
+        return {
+            "bucket": self.bucket,
+            "ok": bool(state.get("available")),
+            "writable": bool(state.get("available")),
+            "engine": state.get("engine"),
+            "degraded": bool(state.get("degraded")),
+            "minio_available": bool(state.get("minio_available")),
+            "fallback_available": bool(state.get("fallback_available")),
+        }
+
+    def upload(self, local_path: Path, remote_key: str) -> str:
+        try:
+            return upload_internal_file(self.bucket, local_path, self._key(remote_key))
+        except Exception as exc:
+            raise StorageProviderError("O storage interno não conseguiu gravar o snapshot.") from exc
+
+    def download(self, location: str, local_path: Path) -> Path:
+        try:
+            return download_internal_file(self.bucket, location, local_path)
+        except Exception as exc:
+            raise StorageProviderError("O storage interno não conseguiu ler o snapshot.") from exc
+
+    def delete(self, location: str) -> None:
+        try:
+            delete_internal_object(self.bucket, location)
+        except Exception as exc:
+            raise StorageProviderError("O storage interno não conseguiu remover o snapshot.") from exc
 
 
 class DropboxStorageAdapter(StorageAdapter):
@@ -515,17 +571,21 @@ class SFTPStorageAdapter(StorageAdapter):
 
 
 def build_storage_adapter(provider: StorageProvider) -> StorageAdapter:
+    config = provider.config or {}
+    if config.get("managed") is True and config.get("storage_class") == "internal_s3":
+        return ManagedInternalStorageAdapter(config)
+
     secret = SecretStore().decrypt_dict(provider.secret_encrypted)
     if provider.kind == "local":
-        return LocalStorageAdapter(provider.config)
+        return LocalStorageAdapter(config)
     if provider.kind == "s3":
-        return S3StorageAdapter(provider.config, secret)
+        return S3StorageAdapter(config, secret)
     if provider.kind == "minio":
-        return S3StorageAdapter(provider.config, secret, minio=True)
+        return S3StorageAdapter(config, secret, minio=True)
     if provider.kind == "dropbox":
-        return DropboxStorageAdapter(provider.config, secret)
+        return DropboxStorageAdapter(config, secret)
     if provider.kind == "google_drive":
-        return GoogleDriveStorageAdapter(provider.config, secret)
+        return GoogleDriveStorageAdapter(config, secret)
     if provider.kind == "sftp":
-        return SFTPStorageAdapter(provider.config, secret)
+        return SFTPStorageAdapter(config, secret)
     raise StorageProviderError(f"Provider não suportado: {provider.kind}")
