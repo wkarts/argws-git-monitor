@@ -54,7 +54,7 @@ async function toggleActions(): Promise<void> {
   try {
     const state = await api.get<ActionsState>(`/repository-controls/${props.repository.id}/actions`)
     const nextEnabled = !state.enabled
-    const confirmed = await dialogs.confirm({
+    const confirmed = await dialogs.askConfirmation({
       title: nextEnabled ? 'Ativar GitHub Actions?' : 'Desativar GitHub Actions?',
       message: nextEnabled
         ? `Os workflows de ${props.repository.full_name} voltarão a aceitar execuções.`
@@ -81,7 +81,7 @@ async function toggleActions(): Promise<void> {
 
 async function togglePrivacy(): Promise<void> {
   const nextPrivate = !props.repository.private
-  const confirmed = await dialogs.confirm({
+  const confirmed = await dialogs.askConfirmation({
     title: nextPrivate ? 'Tornar repositório privado?' : 'Tornar repositório público?',
     message: `${props.repository.full_name} será alterado no próprio GitHub.`,
     tone: nextPrivate ? 'warning' : 'danger',
@@ -96,7 +96,7 @@ async function togglePrivacy(): Promise<void> {
 }
 
 async function removeMonitoring(): Promise<void> {
-  const confirmed = await dialogs.confirm({
+  const confirmed = await dialogs.askConfirmation({
     title: 'Ignorar repositório no Git Monitor?',
     message: `${props.repository.full_name} continuará intacto no GitHub, mas desaparecerá do monitor e não voltará nas próximas sincronizações. Você poderá reativá-lo depois pela lista de ignorados.`,
     tone: 'warning',
@@ -111,7 +111,7 @@ async function removeMonitoring(): Promise<void> {
 }
 
 async function deleteFromGithub(): Promise<void> {
-  const confirmation = await dialogs.prompt({
+  const confirmation = await dialogs.askText({
     title: 'Excluir definitivamente no GitHub?',
     message: 'Esta ação remove o repositório remoto e não pode ser desfeita pelo Git Monitor. Backups existentes não substituem uma confirmação consciente desta exclusão.',
     tone: 'danger',
