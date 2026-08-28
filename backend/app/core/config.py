@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     celery_broker_url: str = "amqp://gitmonitor:gitmonitor@rabbitmq:5672//"
     celery_result_backend: str = "redis://redis:6379/1"
 
+    # Object storage interno real. A stack injeta uma credencial dedicada quando
+    # configurada; instalações existentes continuam válidas usando APP_SECRET_KEY.
+    minio_internal_endpoint: str = "http://minio:9000"
+    minio_internal_access_key: str = "argws-internal"
+    minio_internal_secret_key: str | None = None
+    minio_internal_region: str = "us-east-1"
+
     initial_admin_name: str = "Administrador ARGWS"
     initial_admin_email: EmailStr = "admin@argws.com.br"
     initial_admin_password: str = Field(min_length=12)
@@ -86,6 +93,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+
+    @property
+    def internal_minio_secret(self) -> str:
+        return self.minio_internal_secret_key or self.app_secret_key
 
     @property
     def is_production(self) -> bool:
