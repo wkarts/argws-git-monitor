@@ -23,6 +23,7 @@ celery_app = Celery(
         "app.tasks.platform",
         "app.tasks.backup_lifecycle",
         "app.tasks.realtime",
+        "app.tasks.storage_hub",
     ],
 )
 celery_app.conf.update(
