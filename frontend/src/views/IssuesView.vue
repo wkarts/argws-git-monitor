@@ -10,9 +10,11 @@ import OperationStatusBanner from '../components/OperationStatusBanner.vue'
 import PaginationBar from '../components/PaginationBar.vue'
 import { ApiError, api } from '../services/api'
 import { formatRelative } from '../services/format'
+import { useDialogStore } from '../stores/dialog'
 import { useToastStore } from '../stores/toast'
 import type { MessageResponse, OperationIssue, PaginatedResponse, Repository } from '../types/api'
 
+const dialogs = useDialogStore()
 const toasts = useToastStore()
 const response = ref<PaginatedResponse<OperationIssue> | null>(null)
 const repositories = ref<Repository[]>([])
@@ -31,7 +33,12 @@ async function loadRepositories():Promise<void>{const all:Repository[]=[];let p=
 async function load():Promise<void>{loading.value=true;errorMessage.value='';try{response.value=await api.get<PaginatedResponse<OperationIssue>>(`/operations/issues?${buildQuery()}`);if(!repositories.value.length)await loadRepositories()}catch(error){errorMessage.value=error instanceof ApiError?error.message:'Não foi possível carregar as issues.'}finally{loading.value=false}}
 function changePage(target:number):void{page.value=target;void load();window.scrollTo({top:0,behavior:'smooth'})}
 async function createIssue():Promise<void>{if(!createForm.repository_id||!createForm.title.trim())return;busyIssue.value='create';try{const result=await api.post<MessageResponse>('/operations/issues',{repository_id:createForm.repository_id,title:createForm.title.trim(),body:createForm.body.trim()||null});toasts.success('Issue criada',result.message);Object.assign(createForm,{repository_id:createForm.repository_id,title:'',body:''});showCreate.value=false;await load()}catch(error){toasts.error('Não foi possível criar',error instanceof ApiError?error.message:undefined)}finally{busyIssue.value=null}}
-async function closeIssue(issue:OperationIssue):Promise<void>{if(!window.confirm(`Fechar #${issue.number} · ${issue.title}?`))return;busyIssue.value=issue.id;try{const result=await api.patch<MessageResponse>(`/operations/issues/${issue.id}/state`,{state:'closed'});toasts.success('Issue fechada',result.message);await load()}catch(error){toasts.error('GitHub recusou a alteração',error instanceof ApiError?error.message:undefined)}finally{busyIssue.value=null}}
+async function closeIssue(issue:OperationIssue):Promise<void>{
+  const accepted=await dialogs.askConfirmation({title:'Fechar issue no GitHub?',message:`#${issue.number} · ${issue.title}\n\nA issue será marcada como fechada no repositório ${issue.repository_full_name}.`,tone:'warning',confirmLabel:'Fechar issue'})
+  if(!accepted)return
+  busyIssue.value=issue.id
+  try{const result=await api.patch<MessageResponse>(`/operations/issues/${issue.id}/state`,{state:'closed'});toasts.success('Issue fechada',result.message);await load()}catch(error){toasts.error('GitHub recusou a alteração',error instanceof ApiError?error.message:undefined)}finally{busyIssue.value=null}
+}
 watch(query,()=>{window.clearTimeout(debounceTimer);debounceTimer=window.setTimeout(()=>{page.value=1;void load()},350)})
 onMounted(load);onBeforeUnmount(()=>window.clearTimeout(debounceTimer))
 </script>
