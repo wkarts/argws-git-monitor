@@ -1,0 +1,82 @@
+name: Espelhar dependencias no GHCR
+
+on:
+  workflow_call:
+    inputs:
+      refresh_existing:
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      refresh_existing:
+        description: "Atualizar imagens ja espelhadas (exige revisao de impacto)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: git-monitor-ghcr-dependencies
+  cancel-in-progress: false
+
+jobs:
+  catalog:
+    name: Validar catalogo de imagens
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.catalog.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Gerar matrix a partir do catalogo versionado
+        id: catalog
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "matrix=$(python3 scripts/validate-ghcr-dependencies.py --matrix)" >> "$GITHUB_OUTPUT"
+
+  mirror:
+    name: Espelhar ${{ matrix.name }}
+    needs: catalog
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.catalog.outputs.matrix) }}
+    steps:
+      - name: Instalar Skopeo
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo
+
+      - name: Autenticar no GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s' "$GHCR_TOKEN" | skopeo login --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+
+      - name: Copiar indice multi-arquitetura sem modificar a imagem
+        shell: bash
+        env:
+          SOURCE_IMAGE: ${{ matrix.source }}
+          TARGET_IMAGE: ${{ matrix.target }}
+          REFRESH_EXISTING: ${{ inputs.refresh_existing || false }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$REFRESH_EXISTING" != true ]] && skopeo inspect --raw "docker://$TARGET_IMAGE" >/dev/null 2>&1; then
+            echo "Imagem existente preservada: $TARGET_IMAGE"
+          else
+            # Falhe explicitamente se a origem não estiver mais disponível:
+            # nunca substitua MinIO (ou outra dependência) por um fork sem revisão.
+            skopeo inspect --raw "docker://$SOURCE_IMAGE" >/dev/null
+            skopeo copy --all "docker://$SOURCE_IMAGE" "docker://$TARGET_IMAGE"
+            echo "Espelho criado: $SOURCE_IMAGE -> $TARGET_IMAGE"
+          fi
+          skopeo inspect --raw "docker://$TARGET_IMAGE" >/dev/null
+          echo "Verificacao de manifest concluida: $TARGET_IMAGE"
