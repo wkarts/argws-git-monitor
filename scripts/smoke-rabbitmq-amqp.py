@@ -22,7 +22,7 @@ def smoke(url: str) -> None:
         expected = [f"job-{n}" for n in range(1, 4)]
         for job_id in expected:
             producer.publish({"job_id": job_id}, declare=[queue], retry=True)
-        simple = connection.SimpleQueue(queue_name)
+        simple = connection.SimpleQueue(queue)
         try:
             observed = []
             for _ in expected:
