@@ -11,8 +11,8 @@ from kombu import Connection, Exchange, Producer, Queue
 
 def smoke(url: str) -> None:
     queue_name = f"gitmonitor-smoke-{uuid.uuid4().hex}"
-    exchange = Exchange(queue_name, type="direct", durable=False, auto_delete=True)
-    queue = Queue(queue_name, exchange=exchange, routing_key=queue_name, durable=False, auto_delete=True)
+    exchange = Exchange(queue_name, type="direct", durable=True, auto_delete=False)
+    queue = Queue(queue_name, exchange=exchange, routing_key=queue_name, durable=True, auto_delete=False)
 
     with Connection(url, heartbeat=0, connect_timeout=8) as connection:
         channel = connection.channel()
