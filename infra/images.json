@@ -28,9 +28,10 @@
     },
     {
       "name": "minio",
-      "source": "docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z",
+      "source": "docker.io/dappros/minio:RELEASE.2025-09-07T16-13-09Z",
       "tag": "RELEASE.2025-09-07T16-13-09Z",
-      "target": "ghcr.io/wkarts/argws-git-monitor-minio:RELEASE.2025-09-07T16-13-09Z"
+      "target": "ghcr.io/wkarts/argws-git-monitor-minio:RELEASE.2025-09-07T16-13-09Z",
+      "provenance": "third-party archival mirror, MinIO upstream image no longer anonymously available; validate exact version and review trust before production"
     },
     {
       "name": "python",
