@@ -162,6 +162,7 @@ jobs:
           pip install pyyaml cryptography pillow
           python scripts/validate-package.py
           python scripts/validate-deploy-layout.py
+          python scripts/validate-ghcr-dependencies.py
 
       - name: Validar Compose da raiz
         run: |
