@@ -184,11 +184,23 @@ jobs:
       - name: Validar Compose CloudPanel e Dockge
         run: docker compose --env-file deploy/cloudpanel/dockge/.env.example -f deploy/cloudpanel/dockge/compose.yaml config -q
 
+  dependencies:
+    name: Garantir imagens de infraestrutura no GHCR
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.release_required == 'true' && needs.prepare.outputs.release_ready == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/mirror-dependencies.yml
+    with:
+      refresh_existing: false
+
   images:
     name: Imagem ${{ matrix.component }}
     needs:
       - prepare
       - validate
+      - dependencies
     if: needs.prepare.outputs.release_required == 'true' && needs.prepare.outputs.release_ready == 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -250,6 +262,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PYTHON_BASE=ghcr.io/${{ github.repository_owner }}/argws-git-monitor-python:3.13-slim
+            NODE_BASE=ghcr.io/${{ github.repository_owner }}/argws-git-monitor-node:24-alpine
+            NGINX_BASE=ghcr.io/${{ github.repository_owner }}/argws-git-monitor-nginx:1.27-alpine
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
           provenance: mode=max
