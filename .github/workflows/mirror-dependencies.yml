@@ -80,3 +80,14 @@ jobs:
           fi
           skopeo inspect --raw "docker://$TARGET_IMAGE" >/dev/null
           echo "Verificacao de manifest concluida: $TARGET_IMAGE"
+          if [[ "${{ matrix.name }}" == minio ]]; then
+            skopeo inspect --override-arch amd64 --override-os linux "docker://$TARGET_IMAGE" >/dev/null
+            skopeo inspect --override-arch arm64 --override-os linux "docker://$TARGET_IMAGE" >/dev/null
+            # A origem é um espelho comunitário da release antiga, não o fornecedor oficial.
+            # Confirme a versão real antes de liberar artefatos da aplicação.
+            printf '%s' "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >/dev/null
+            docker pull "$TARGET_IMAGE"
+            installed_version="$(docker run --rm --entrypoint minio "$TARGET_IMAGE" --version)"
+            echo "$installed_version"
+            grep -F 'RELEASE.2025-09-07T16-13-09Z' <<< "$installed_version"
+          fi

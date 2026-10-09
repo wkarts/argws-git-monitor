@@ -44,6 +44,11 @@ def load_catalog() -> list[dict[str, str]]:
         assert re.fullmatch(r"[a-z]+", name)
         assert re.fullmatch(r"[A-Za-z0-9._-]+", tag) and tag != "latest"
         assert source.startswith("docker.io/") and source.endswith(":" + tag)
+        if name == "minio":
+            assert source == "docker.io/dappros/minio:RELEASE.2025-09-07T16-13-09Z"
+            assert "third-party" in item.get("provenance", "")
+        else:
+            assert source.startswith("docker.io/library/"), (name, source)
         assert target == f"ghcr.io/wkarts/argws-git-monitor-{name}:{tag}"
     return entries
 
