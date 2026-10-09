@@ -1,4 +1,6 @@
-FROM node:24-alpine AS build
+ARG NODE_BASE=node:24-alpine
+ARG NGINX_BASE=nginx:1.27-alpine
+FROM ${NODE_BASE} AS build
 
 WORKDIR /app
 
@@ -11,7 +13,7 @@ RUN npm install --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine AS runtime
+FROM ${NGINX_BASE} AS runtime
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 RUN nginx -t

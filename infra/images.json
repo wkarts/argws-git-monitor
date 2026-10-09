@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "description": "Mirrors multi-architecture GHCR dependencies for ARGWS Git Monitor. No application runtime changes.",
+  "images": [
+    {
+      "name": "alpine",
+      "source": "docker.io/library/alpine:3.21",
+      "tag": "3.21",
+      "target": "ghcr.io/wkarts/argws-git-monitor-alpine:3.21"
+    },
+    {
+      "name": "postgres",
+      "source": "docker.io/library/postgres:17-alpine",
+      "tag": "17-alpine",
+      "target": "ghcr.io/wkarts/argws-git-monitor-postgres:17-alpine"
+    },
+    {
+      "name": "redis",
+      "source": "docker.io/library/redis:7.4-alpine",
+      "tag": "7.4-alpine",
+      "target": "ghcr.io/wkarts/argws-git-monitor-redis:7.4-alpine"
+    },
+    {
+      "name": "rabbitmq",
+      "source": "docker.io/library/rabbitmq:4-management-alpine",
+      "tag": "4-management-alpine",
+      "target": "ghcr.io/wkarts/argws-git-monitor-rabbitmq:4-management-alpine"
+    },
+    {
+      "name": "minio",
+      "source": "docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z",
+      "tag": "RELEASE.2025-09-07T16-13-09Z",
+      "target": "ghcr.io/wkarts/argws-git-monitor-minio:RELEASE.2025-09-07T16-13-09Z"
+    },
+    {
+      "name": "python",
+      "source": "docker.io/library/python:3.13-slim",
+      "tag": "3.13-slim",
+      "target": "ghcr.io/wkarts/argws-git-monitor-python:3.13-slim"
+    },
+    {
+      "name": "node",
+      "source": "docker.io/library/node:24-alpine",
+      "tag": "24-alpine",
+      "target": "ghcr.io/wkarts/argws-git-monitor-node:24-alpine"
+    },
+    {
+      "name": "nginx",
+      "source": "docker.io/library/nginx:1.27-alpine",
+      "tag": "1.27-alpine",
+      "target": "ghcr.io/wkarts/argws-git-monitor-nginx:1.27-alpine"
+    }
+  ]
+}
