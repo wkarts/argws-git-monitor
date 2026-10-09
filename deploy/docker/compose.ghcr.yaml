@@ -46,7 +46,7 @@ x-api-service: &api-service
 
 services:
   logs-init:
-    image: alpine:3.21
+    image: ghcr.io/wkarts/argws-git-monitor-alpine:3.21
     restart: "no"
     user: "0:0"
     command:
@@ -67,7 +67,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   postgres:
-    image: postgres:17-alpine
+    image: ghcr.io/wkarts/argws-git-monitor-postgres:17-alpine
     restart: unless-stopped
     command: ["postgres","-c","logging_collector=on","-c","log_directory=/var/log/postgresql","-c","log_filename=postgresql-%Y-%m-%d.log","-c","log_rotation_age=1d","-c","log_truncate_on_rotation=on"]
     environment:
@@ -89,7 +89,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   redis:
-    image: redis:7.4-alpine
+    image: ghcr.io/wkarts/argws-git-monitor-redis:7.4-alpine
     restart: unless-stopped
     command: ["redis-server","--appendonly","yes","--save","60","1000","--logfile","/var/log/redis/redis.log"]
     volumes:
@@ -106,7 +106,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   rabbitmq:
-    image: rabbitmq:4-management-alpine
+    image: ghcr.io/wkarts/argws-git-monitor-rabbitmq:4-management-alpine
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-gitmonitor}
@@ -122,15 +122,15 @@ services:
     depends_on:
       logs-init: { condition: service_completed_successfully }
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 8s
-      retries: 12
-      start_period: 20s
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/5672"]
+      interval: 60s
+      timeout: 3s
+      retries: 5
+      start_period: 90s
     security_opt: ["no-new-privileges:true"]
 
   minio:
-    image: minio/minio:latest
+    image: ghcr.io/wkarts/argws-git-monitor-minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
