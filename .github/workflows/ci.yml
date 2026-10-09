@@ -32,6 +32,41 @@ jobs:
       - run: python -m compileall -q app tests migrations
       - run: pytest --cov=app --cov-report=term-missing --cov-fail-under=40
 
+
+  amqp_smoke:
+    name: RabbitMQ publish, consume, ack e requeue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Subir broker descartavel sem alterar producao
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker run -d --rm --name gitmonitor-amqp-smoke \
+            -e RABBITMQ_DEFAULT_USER=smoke \
+            -e RABBITMQ_DEFAULT_PASS=smoke-only-ci \
+            -p 127.0.0.1:56879:5672 \
+            rabbitmq:4-management-alpine
+      - name: Validar Bash TCP e mensageria AMQP
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          trap 'docker logs --tail=60 gitmonitor-amqp-smoke || true; docker rm -f gitmonitor-amqp-smoke || true' EXIT
+          ok=false
+          for i in $(seq 1 90); do
+            if docker exec gitmonitor-amqp-smoke bash -ec 'exec 3<>/dev/tcp/127.0.0.1/5672' 2>/dev/null; then
+              ok=true
+              break
+            fi
+            sleep 2
+          done
+          [[ "$ok" == true ]] || { echo 'RabbitMQ nao abriu a porta AMQP' >&2; exit 1; }
+          python -m pip install 'kombu>=5.5,<6'
+          python scripts/smoke-rabbitmq-amqp.py --url 'amqp://smoke:smoke-only-ci@127.0.0.1:56879//'
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
